@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AttackResult",
+  "description": "Structured output from an attack module execution",
+  "type": "object",
+  "required": ["module_id", "attack_type", "payload", "raw_response", "canonical_result", "risk_score"],
+  "properties": {
+    "module_id": { "type": "string" },
+    "attack_type": { "type": "string" },
+    "payload": { "type": "string" },
+    "raw_response": { "type": "string" },
+    "canonical_result": { "type": "object" },
+    "judge_score": { "type": ["number", "null"] },
+    "risk_score": { "type": "number" },
+    "evaluation_methodology": { "type": "string" }
+  }
+}

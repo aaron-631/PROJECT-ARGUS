@@ -1,0 +1,4 @@
+# High-stakes production environment
+profile: banking_agent
+c_env: 1.0
+description: "Production autonomous banking agent — maximum risk sensitivity"

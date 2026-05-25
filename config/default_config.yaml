@@ -1,0 +1,18 @@
+# Argus Default Configuration
+version: "1.0"
+
+engine:
+  max_concurrent_attacks: 10
+  rate_limit_rps: 5
+  timeout_seconds: 30
+
+judge:
+  backend: "NullJudgeBackend"  # Default: no external calls
+
+reporting:
+  formats: ["json", "markdown"]
+  output_dir: "./reports"
+
+vault:
+  enabled: true
+  vault_dir: ".vault"

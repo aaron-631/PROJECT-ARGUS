@@ -1,0 +1,25 @@
+# Vault — never commit encrypted payloads
+.vault/
+
+# Reports
+reports/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Env files — GDPR: no secrets in repo
+.env
+*.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

@@ -1,0 +1,10 @@
+version: "3.9"
+services:
+  argus:
+    build: .
+    volumes:
+      - ./config:/app/config:ro
+      - ./reports:/app/reports
+      - ./.vault:/app/.vault
+    environment:
+      - ARGUS_ENV=production
