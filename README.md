@@ -151,18 +151,43 @@ events. It expects buffered JSON HTTP (`stream: false`) and is not, by itself,
 the complete public-internet TLS/identity boundary. See the [deployment and
 runtime guide](WORKFLOW.md#9-docker-and-deployment-workflow).
 
-## What is proven
+## Proof of concept and evidence
 
-The documented real run inspected installed Claude Code, Codex CLI, and Gemini
-CLI configuration files and launched the pinned official filesystem MCP server:
-14 tools, one page, zero tool calls, and two HIGH findings. The project also has
-unit coverage, CI configuration, Docker/Compose smoke workflows, report-schema
-checks, and runtime gateway tests.
+Run the short POC from the repository root:
 
-The recorded run did not call a live OpenAI/Anthropic/Gemini/Ollama model or a
-live authenticated Streamable HTTP server. Windows, macOS, ARM, enterprise
-proxies, and unusual MCP implementations require a short local smoke test.
-These boundaries are documented in [WORKFLOW.md](WORKFLOW.md#what-this-evidence-provesand-what-it-does-not).
+```bash
+mkdir -p reports/poc
+.venv/bin/python argus.py audit --target ./config --output ./reports/poc/static
+```
+
+Then run the real MCP command from [Inspect a live MCP server](#inspect-a-live-mcp-server)
+with `--output ./reports/poc/real-mcp`. The complete runtime, mock-LLM, and
+acceptance procedure is in [POC.md](POC.md).
+
+| Evidence | Recorded result |
+| --- | --- |
+| Automated quality gate | 53 tests passed; Black, Flake8, mypy, and schema checks passed |
+| Real agent tooling | Claude Code, Codex CLI, and Gemini CLI configuration files were scanned |
+| Real MCP server | Official pinned filesystem server: 14 tools, 1 page, 0 tool calls, 2 HIGH findings, `BLOCK` |
+| Runtime POC | The repository CI/Compose workflow is configured to verify health, `403` prompt blocking, forwarding, metrics, and sanitized audit events |
+
+The real MCP evidence is documented in [WORKFLOW.md](WORKFLOW.md#661-real-world-verification-run).
+The reports to retain as proof are `report.md`, `report.json`, and
+`runtime-audit/events.jsonl`. Record the OS, Python/Node versions, package
+versions, command, timestamp, and whether each endpoint was mock or real.
+
+This evidence does not claim a live commercial LLM test, live authenticated
+Streamable HTTP test, every operating system, or every MCP transport. Those
+must be run in the target environment before production approval.
+
+## Scope boundary
+
+Argus is a release gate and runtime policy component, not a universal security
+certification. It supports Python 3.11+, Docker, real authorized stdio MCP
+servers, Streamable HTTP discovery, and provider-specific JSON HTTP model
+adapters. Legacy HTTP+SSE, custom MCP transports, live commercial LLM evidence,
+and every OS/proxy/server implementation require a target-environment smoke
+test. See the [full evidence boundary](WORKFLOW.md#what-this-evidence-provesand-what-it-does-not).
 
 ## Development checks
 
