@@ -2,7 +2,9 @@
 
 This document is the complete practical guide to Project Argus. It explains what the project does, why each major decision was made, how the code works, how to test it in real time, and how to describe it in an interview.
 
-If you only need a quick command, use `README.md`. If you need to understand the project, use this document from top to bottom.
+If you only need a quick command, use `README.md`. If you want to run the
+complete proof-of-concept, use `POC.md`. If you need to understand the project,
+use this document from top to bottom.
 
 ## Placement mode: how to prepare using only this document
 
@@ -113,6 +115,7 @@ The main orchestration is in `argus.py` and `src/core/engine.py`.
 | Path | Responsibility |
 | --- | --- |
 | `argus.py` | CLI parser, scan lifecycle, report writing, exit codes |
+| `POC.md` | Copy-paste proof-of-concept run and acceptance evidence |
 | `config/default_config.yaml` | Default engine, report, judge, vault, scanner, and attack settings |
 | `config/profiles/` | Explicit deployment-context profiles |
 | `src/core/config.py` | YAML loading, profile merge, safe environment overrides |

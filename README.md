@@ -1,173 +1,88 @@
 # Project Argus
 
-Argus is a local-first security toolkit for AI agents. It has two layers: a pre-deployment scanner for repositories and an optional runtime gateway that enforces request/response policies while an agent is live.
-
-Think of it as two gates: a pre-deployment release gate and an optional live-traffic policy gate:
+Argus is a local-first security toolkit for AI agents, MCP servers, skills, and
+LLM deployments. It has two gates:
 
 ```text
-agent files ──> static checks ──┐
-                                ├──> JSON/Markdown report ──> CI decision
-running AI endpoint ─> attacks ─┘
-agent traffic ─> runtime gateway ─> model endpoint
+agent/config/skills ──> static + live checks ──> report + CI decision
+agent traffic ────────> runtime gateway ───────> allow / block / redact / audit
 ```
 
-The scanner and gateway are separate on purpose: the scanner decides whether a release is acceptable; the gateway blocks or redacts traffic for a running placement assistant. Argus is not an IAM system, dashboard, SIEM, sandbox, or guarantee of safety.
+It is useful for release reviews and real authorized security checks. It is not
+an IAM system, sandbox, SIEM, or universal guarantee of safety.
 
-## First run: choose one path
-
-If you are new to Argus, start with a local configuration audit. It is safe,
-fast, and makes no network call:
-
-```bash
-.venv/bin/python argus.py audit --target ./config --output ./reports/first-run
-```
-
-Open `reports/first-run/report.md`. Then choose the next level:
-
-1. `--target /path/to/agent` checks source, configuration, MCP declarations,
-   tools, and skills.
-2. `--endpoint ...` adds authorized live model probes through `--provider`.
-3. `docker-compose.runtime.yml` puts the runtime gateway in front of a real
-   JSON HTTP model service.
-
-The decision is simple: `PASS` means no defined rule crossed the configured
-threshold, `BLOCK` means findings need review, and `ERROR` means the test could
-not complete. A PASS is not a universal security guarantee.
-
-Choose the command by what is live:
-
-| Goal | Command | What it does |
-| --- | --- | --- |
-| Review files/config/skills | `argus.py audit --target PATH` | Safe static scan; launches nothing |
-| Test a live LLM HTTP endpoint | `argus.py audit --target PATH --endpoint URL ...` | Sends bounded, authorized behavior probes |
-| Inspect a live MCP server | `argus.py mcp-probe --transport ... --confirm-live` | Reads `initialize` and `tools/list`; calls zero tools |
-| Protect deployed model traffic | `docker-compose.runtime.yml` | Runs the V2 gateway in front of a JSON HTTP upstream |
-
-## Run it against a real agent repository
+## Quick start
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-
-# Audit any local agent/LLM repository. This contacts no model endpoint.
-.venv/bin/python argus.py audit \
-  --target /path/to/your-agent-repository \
-  --output ./reports/agent
+.venv/bin/python argus.py audit --target ./config --output ./reports/first-run
 ```
 
-`audit` and `scan` are aliases. Argus reads source, dependency/configuration
-files, MCP server definitions, and tool schemas. It reports hardcoded secrets,
-unsafe code execution, wildcard filesystem or administrative permissions,
-unrestricted network egress, unapproved high-impact tools, unpinned MCP
-servers, unsafe TLS settings, and model-behavior results when a live endpoint
-is explicitly supplied. It does not execute the target repository.
+Open `reports/first-run/report.md`. `PASS` means no configured rule crossed the
+gate; `BLOCK` means review is required; `ERROR` means the check did not finish.
 
-Use a deployment profile when the same finding should carry different business impact:
+For the complete proof-of-concept, use [POC.md](POC.md). For the architecture,
+code walkthrough, decisions, tradeoffs, interview preparation, and limits, use
+[WORKFLOW.md](WORKFLOW.md).
+
+## Choose the right command
+
+| Goal | Command | Network/process behavior |
+| --- | --- | --- |
+| Review a repository, config, MCP definitions, or skills | `argus.py audit --target PATH` | Static; launches nothing |
+| Test an authorized live LLM endpoint | `argus.py audit --target PATH --endpoint URL ...` | Bounded behavior probes |
+| Inspect a live MCP server | `argus.py mcp-probe --transport ... --confirm-live` | `initialize` + paginated `tools/list`; zero tool calls |
+| Protect deployed model traffic | `docker-compose.runtime.yml` | Runtime allow/block/redact gateway |
+
+Detailed guides: [static and dynamic testing](WORKFLOW.md#6-real-time-dynamic-testing),
+[live MCP discovery](WORKFLOW.md#live-read-only-mcp-discovery),
+[OpenClaw](WORKFLOW.md#66-openclaw-skills-and-mcp-workflow), and
+[runtime enforcement](WORKFLOW.md#67-runtime-monitoring-and-blocking-gateway-argus-v2).
+
+## Scan a real agent repository
 
 ```bash
 .venv/bin/python argus.py audit \
-  --target /path/to/your-agent-repository \
+  --target /path/to/agent-repository \
+  --output ./reports/agent
+```
+
+Argus checks source, JSON/YAML/TOML/Python, secrets, shell execution, MCP
+servers, tool schemas, permissions, egress, TLS, unpinned packages, and skills.
+Use a profile when business context changes the risk:
+
+```bash
+.venv/bin/python argus.py audit \
+  --target /path/to/agent-repository \
   --profile banking_agent \
   --output ./reports/banking-agent
 ```
 
-Reports are written to `report.json` and `report.md`.
+Reports are `report.json` and `report.md`. `audit` and `scan` are aliases.
 
-## Test an authorized live model
+## Test a live LLM endpoint
 
-Live testing is opt-in. Use the provider adapter that matches the endpoint;
-the API key is read from an environment variable and is never written to the
-report. OpenAI-compatible gateways use the `openai` adapter too.
+Live testing is opt-in. Credentials come from environment variables and are not
+written to reports:
 
 ```bash
 export OPENAI_API_KEY='...'
 .venv/bin/python argus.py audit \
-  --target /path/to/your-agent-repository \
+  --target /path/to/agent-repository \
   --endpoint https://api.openai.com/v1/chat/completions \
   --provider openai \
   --model gpt-4o-mini \
   --output ./reports/openai
 ```
 
-Anthropic and local Ollama examples:
+Supported adapters are `generic`, `openai`, `anthropic`, and `ollama`. Only test
+systems you are authorized to evaluate; a failed live transport is an error,
+not a passing result.
 
-```bash
-export ANTHROPIC_API_KEY='...'
-.venv/bin/python argus.py audit --target ./my-agent \
-  --endpoint https://api.anthropic.com/v1/messages \
-  --provider anthropic --model claude-3-5-haiku-20241022
+## Inspect a live MCP server
 
-.venv/bin/python argus.py audit --target ./my-agent \
-  --endpoint http://127.0.0.1:11434/api/chat \
-  --provider ollama --model llama3.1
-```
-
-For an internal API, use `--provider generic`. It sends the same small
-contract used by the local fixture: `{"messages":[{"role":"user","content":"..."}]}`.
-For an authenticated gateway, keep the secret in an environment variable:
-
-```bash
-export ARGUS_GATEWAY_TOKEN='...'
-.venv/bin/python argus.py audit --target ./my-agent \
-  --endpoint https://llm.company.example/v1/messages \
-  --provider generic --api-key-env ARGUS_GATEWAY_TOKEN \
-  --auth-header X-API-Key
-```
-
-Only test endpoints and repositories you are authorized to evaluate. A failed
-live transport is an error, not a passing security result.
-
-## Test the repository's deterministic endpoint
-
-Terminal 1:
-
-```bash
-.venv/bin/python tests/mock_server.py
-```
-
-Terminal 2:
-
-```bash
-.venv/bin/python argus.py audit \
-  --target ./config \
-  --endpoint http://127.0.0.1:8765/v1/messages \
-  --fail-on CRITICAL \
-  --output ./reports/live-test
-```
-
-`--fail-on CRITICAL` is used here so the intentionally vulnerable demo endpoint can produce a report without making the demo command fail. Remove it to use the normal `HIGH` deployment gate.
-
-The fixture is a CI/test oracle, not a production model. Real company testing
-uses the provider commands above.
-
-## What Argus checks in MCP configurations
-
-Point `--target` at the repository containing `mcp.json`, `claude_desktop_config.json`,
-`mcpServers`, tool declarations, or server code. Argus understands structured
-JSON/YAML/TOML values and common MCP layouts, including examples such as:
-
-```json
-{
-  "mcpServers": {
-    "placements": {
-      "command": "npx",
-      "args": ["@company/placement-mcp"],
-      "env": {"*": "inherit"}
-    }
-  },
-  "tools": [{
-    "name": "send_email",
-    "description": "Send an email to any address",
-    "permissions": ["*"]
-  }]
-}
-```
-
-This produces evidence for broad environment access, wildcard/admin
-permissions, missing approval on high-impact tools, unpinned package runners,
-and other applicable findings. A static scan cannot discover tools hidden
-behind a running server. Use the explicit read-only MCP probe for live stdio or
-Streamable HTTP discovery:
+For a real, reviewed stdio server:
 
 ```bash
 .venv/bin/python argus.py mcp-probe \
@@ -177,18 +92,11 @@ Streamable HTTP discovery:
   --arg=@modelcontextprotocol/server-filesystem@2026.7.10 \
   --arg=/approved/directory \
   --timeout 120 \
-  --server-name filesystem \
   --confirm-live \
   --output ./reports/mcp-live
 ```
 
-The probe sends only `initialize` and paginated `tools/list`; it never sends
-`tools/call`. A real server with write-capable tools may correctly produce a
-BLOCK report. A launched stdio server receives a minimal environment (`PATH`,
-temporary-directory variables, and platform launcher variables). Pass only
-additional values it truly needs with `--env CHILD_NAME=LOCAL_ENV_VAR`; Argus
-does not copy the whole shell environment into an untrusted server. For an
-authorized remote Streamable HTTP server:
+For an authorized Streamable HTTP server:
 
 ```bash
 export MCP_AUTHORIZATION='Bearer read-only-probe-token'
@@ -200,173 +108,70 @@ export MCP_AUTHORIZATION='Bearer read-only-probe-token'
   --output ./reports/mcp-http
 ```
 
-The default per-operation timeout is 15 seconds for a bounded review. The
-example uses 120 seconds because `npx` may download a package on its first run;
-preinstall the pinned package or keep the longer timeout for a cold start.
+The probe reads the server's current tool inventory, follows pagination, and
+uses no `tools/call`. It supports stdio and Streamable HTTP, not legacy
+HTTP+SSE or custom transports. A normal static audit never launches a server;
+for dynamic configurations, audit first and explicitly probe each approved
+server. `--confirm-live` is authorization, not a sandbox: use a reviewed
+command or an OS/container sandbox for untrusted packages.
 
-If a reviewed stdio server needs one credential or configuration value, expose
-it explicitly:
+See the [dynamic MCP decision guide](WORKFLOW.md#live-read-only-mcp-discovery)
+and the [recorded real-server report](WORKFLOW.md#661-real-world-verification-run).
 
-```bash
-export MCP_READ_TOKEN='read-only-token'
-.venv/bin/python argus.py mcp-probe --transport stdio \
-  --command python --arg ./reviewed_server.py \
-  --env MCP_READ_TOKEN=MCP_READ_TOKEN \
-  --confirm-live --output ./reports/mcp-stdio
-```
+## OpenClaw, Claude Code, Codex CLI, and Gemini CLI
 
-Use a fixed package version, a narrow filesystem root, TLS, and a credential
-with discovery-only access. Legacy HTTP+SSE and custom MCP transports are not
-yet supported by `mcp-probe`; use the host agent's diagnostic command for
-those transports. The runtime gateway or an authorized live integration test
-still provides the deployed traffic control layer.
-
-`--confirm-live` is an authorization check, not a sandbox. A stdio server runs
-with the current operating-system user's permissions; only launch a reviewed
-command, or place it in a container/OS sandbox when the package is not trusted.
-
-For a dynamic MCP setup, run the static audit first and then probe each
-authorized server whose live tool list matters. Argus does not infer commands,
-inherit secrets, or launch every server found in a config file. If a server can
-change its tools while running, repeat the probe at release time and use the
-host agent/runtime gateway for ongoing policy enforcement.
-
-## Audit an OpenClaw installation
-
-OpenClaw skills are instruction files that can cause an agent to use powerful
-tools. Audit the config and each skill root after installing or updating skills:
+Point Argus at the configuration and skill directories chosen by the operator:
 
 ```bash
 .venv/bin/python argus.py audit --target "$HOME/.openclaw" --output ./reports/openclaw
-.venv/bin/python argus.py audit \
-  --target "$HOME/.openclaw/workspace/skills" \
-  --output ./reports/openclaw-workspace-skills
-.venv/bin/python argus.py audit \
-  --target "$HOME/.agents/skills" \
-  --output ./reports/openclaw-agent-skills
+.venv/bin/python argus.py audit --target "$HOME/.claude/settings.json" --output ./reports/claude
+.venv/bin/python argus.py audit --target "$HOME/.codex/config.toml" --output ./reports/codex
+.venv/bin/python argus.py audit --target "$HOME/.gemini/settings.json" --output ./reports/gemini
 ```
 
-Argus understands OpenClaw JSON5-style config, `mcp.servers`, `mcpServers`,
-`SKILL.md` files, skill environment/API-key entries, tool profiles, elevated
-execution, and common install commands. It flags authority-override
-instructions, arbitrary shell commands, secret harvesting, data exfiltration,
-unpinned downloads, and skills with no verifiable provenance metadata. A
-missing provenance record means “review required”; it is not by itself proof
-that a first-party skill is malicious.
+Paths vary by version and operating system. Confirm the active config first;
+never scan credential databases or session history. See the [OpenClaw and CLI
+workflow](WORKFLOW.md#66-openclaw-skills-and-mcp-workflow).
 
-For live MCP connectivity, use OpenClaw's own authorized diagnostic first, then
-use Argus for repository evidence or an explicit read-only probe:
+## Runtime gateway
 
-```bash
-openclaw mcp doctor --probe
-openclaw mcp list --json > /tmp/openclaw-mcp.json
-.venv/bin/python argus.py audit --target /tmp/openclaw-mcp.json
-
-# If the configured server is stdio, copy its reviewed command and arguments:
-.venv/bin/python argus.py mcp-probe --transport stdio \
-  --command npx --arg=-y --arg=@company/reviewed-mcp@1.2.3 \
-  --arg=/approved/root --timeout 120 --confirm-live \
-  --output ./reports/openclaw-live-mcp
-```
-
-Argus does not launch skill code or MCP servers during a static audit. This is
-intentional: the scan must be safe to run on an untrusted installation. Use
-the V2 runtime gateway for deployed request/tool enforcement.
-
-Only send probes to systems you are authorized to evaluate. See [WORKFLOW.md](WORKFLOW.md) for the complete walkthrough, architecture, design decisions, interview explanation, testing recipes, and troubleshooting guide.
-
-## Audit Claude Code, Codex CLI, or Gemini CLI configuration
-
-Argus does not attach to a running CLI or read conversation history. Point it
-at the configuration and MCP files that the operator chooses to review:
-
-```bash
-.venv/bin/python argus.py audit --target "$HOME/.claude/settings.json" \
-  --output ./reports/claude-code
-.venv/bin/python argus.py audit --target "$HOME/.codex/config.toml" \
-  --output ./reports/codex
-.venv/bin/python argus.py audit --target "$HOME/.gemini/settings.json" \
-  --output ./reports/gemini
-```
-
-Also scan project-level files such as `.claude/settings.json` or
-`.gemini/settings.json`, and any MCP file the CLI actually loads. Paths vary
-by installation and operating system, so confirm the active configuration in
-that tool first. Never point Argus at credential databases, session history,
-or private key stores just to make the scan broader. Gemini's documented
-configuration and MCP locations are described in its [configuration guide](https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md)
-and [MCP guide](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md).
-The real installation and official MCP-server verification results are recorded
-in [WORKFLOW.md](WORKFLOW.md#661-real-world-verification-run).
-
-## Docker
-
-With Docker and Compose installed:
-
-```bash
-docker compose up --build --abort-on-container-exit --exit-code-from argus
-```
-
-This starts the local mock endpoint, waits for it to become healthy, runs Argus, and writes reports to `./reports`.
-
-## Runtime gateway (V2)
-
-The practical campus-placement demo puts the agent behind a policy gateway. It blocks prompt injection and dangerous tools, requires approval for record updates/offers/email, restricts external email domains, redacts student contact data, and records sanitized audit events.
-
-```bash
-docker compose up --build -d mock runtime
-curl --fail http://127.0.0.1:8080/healthz
-curl --fail http://127.0.0.1:8080/metrics
-docker compose down
-```
-
-The gateway listens on `POST /v1/messages` and `POST /v1/chat/completions`, then forwards allowed JSON traffic to the configured upstream. See [WORKFLOW.md](WORKFLOW.md) for the policy examples, approval flow, audit format, tradeoffs, provider compatibility, and real-time testing walkthrough.
-
-Common `Authorization`, `x-api-key`, and provider-version headers are forwarded by default; the Argus approval header is never forwarded. Custom upstream header allowlists can be set through `ARGUS_RUNTIME_FORWARD_HEADERS`.
-
-To run V2 against your own model service on another computer:
+The V2 gateway protects a JSON HTTP model service. The repository POC uses the
+mock upstream; another machine can use `docker-compose.runtime.yml` with an
+upstream URL in `.env.runtime`:
 
 ```bash
 cp .env.runtime.example .env.runtime
-# Edit ARGUS_RUNTIME_UPSTREAM_URL and the secret placeholders.
+# Set ARGUS_RUNTIME_UPSTREAM_URL and the required secrets.
 docker compose --env-file .env.runtime -f docker-compose.runtime.yml up --build
 ```
 
-The upstream URL must be reachable from the gateway container. For a model running on the host, use `http://host.docker.internal:<port>/...`; for Kubernetes or another machine, use its service/DNS name or reachable HTTPS URL. Send non-streaming JSON (`"stream": false`); the gateway buffers responses so it can inspect them safely.
+It can require client authentication, block prompt/tool policies, require
+approval, redact sensitive output, expose metrics, and write hash-chained audit
+events. It expects buffered JSON HTTP (`stream: false`) and is not, by itself,
+the complete public-internet TLS/identity boundary. See the [deployment and
+runtime guide](WORKFLOW.md#9-docker-and-deployment-workflow).
 
-The mock service is only for deterministic demos and CI. For TLS, authentication, approval, audit shipping, and replicas, use the production profile described in [WORKFLOW.md](WORKFLOW.md).
+## What is proven
 
-Production baseline:
+The documented real run inspected installed Claude Code, Codex CLI, and Gemini
+CLI configuration files and launched the pinned official filesystem MCP server:
+14 tools, one page, zero tool calls, and two HIGH findings. The project also has
+unit coverage, CI configuration, Docker/Compose smoke workflows, report-schema
+checks, and runtime gateway tests.
 
-```bash
-cp .env.production.example .env.production
-# Configure DNS, upstream, client token, approval service, and audit collector.
-docker compose --env-file .env.production \
-  -f docker-compose.production.yml up --build --scale runtime=2
-```
+The recorded run did not call a live OpenAI/Anthropic/Gemini/Ollama model or a
+live authenticated Streamable HTTP server. Windows, macOS, ARM, enterprise
+proxies, and unusual MCP implementations require a short local smoke test.
+These boundaries are documented in [WORKFLOW.md](WORKFLOW.md#what-this-evidence-provesand-what-it-does-not).
 
-Only Caddy is exposed publicly; clients must send `X-Argus-Client-Token`. The approval service and audit collector are external enterprise integrations, intentionally not auto-approved or stored in the demo repository.
-
-## CI and development checks
+## Development checks
 
 ```bash
 .venv/bin/black --check --target-version py311 src/ tests/ argus.py runtime_gateway.py
 .venv/bin/flake8 src/ tests/ argus.py runtime_gateway.py
-PYTHONPATH=. .venv/bin/mypy src/
-PYTHONPATH=. .venv/bin/pytest -q
+.venv/bin/mypy src/
+.venv/bin/pytest -q
 PYTHONPATH=. .venv/bin/python -m src.models.schema_generation --check
 ```
 
-The GitHub Actions workflow runs these checks plus a local mock integration scan and Docker validation.
-
-## Scope
-
-Argus V1 checks repository/configuration posture—including MCP servers, tools,
-and skill instruction files—and optionally tests model behavior before
-deployment. Argus V2 optionally protects live traffic with a small
-provider-neutral gateway. Both layers are fail-closed for their defined
-policies but do not guarantee safety or replace human review. V2 expects a
-reachable JSON HTTP upstream, is not a public-internet TLS/authentication
-boundary by itself, and does not support token-by-token streaming by default.
-
-For the reasoning behind the design, read [WORKFLOW.md](WORKFLOW.md).
+The project requires Python 3.11+; Docker is the most portable runtime path.
