@@ -167,3 +167,19 @@ def test_openclaw_json5_config_and_mcp_registry_are_scanned(tmp_path: Path) -> N
     assert "ARGUS_ST_019" in rule_ids
     assert "ARGUS_ST_010" in rule_ids
     assert result["summary"]["mcp_servers"][0]["name"] == "docs"
+
+
+def test_package_repository_url_is_not_treated_as_mcp_endpoint(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "real-mcp-server",
+                "repository": {"type": "git", "url": "https://github.com/acme/server.git"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = asyncio.run(ArgusEngine(load_config()).run(ingest_local(str(tmp_path))))
+
+    assert "ARGUS_ST_013" not in {finding["rule_id"] for finding in result["findings"]}

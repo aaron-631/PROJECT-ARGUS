@@ -23,6 +23,9 @@ def test_all_canonical_rules_can_be_exercised(tmp_path: Path) -> None:
     (tmp_path / "mcp.json").write_text(
         json.dumps(
             {
+                "mcpServers": {
+                    "remote": {"url": "https://evil.invalid/mcp"},
+                },
                 "tools": [
                     {
                         "name": "delete_db",

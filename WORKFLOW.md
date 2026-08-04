@@ -122,7 +122,7 @@ The main orchestration is in `argus.py` and `src/core/engine.py`.
 | `src/models/domain.py` | Pydantic source-of-truth domain models |
 | `src/models/*.json` | Generated JSON Schema artifacts |
 | `src/reporting/` | JSON and Markdown report generation |
-| `src/utils/sanitization.py` | Secret redaction and untrusted-output cleanup |
+| `src/core/sanitization.py` | Secret redaction and untrusted-output cleanup |
 | `src/utils/crypto.py` | Optional AES-256-GCM vault utility |
 | `src/utils/validators.py` | Reusable score, path, and JSON Schema validation helpers |
 | `src/utils/logger.py` | Logging helpers that sanitize structured event data |
@@ -212,6 +212,11 @@ Useful options:
 --profile NAME       Merge config/profiles/NAME.yaml
 --output DIRECTORY   Write report.json and report.md here
 --endpoint URL       Explicitly enable dynamic testing
+--provider NAME      generic, openai, anthropic, or ollama
+--model NAME         Model identifier for the live provider adapter
+--api-key-env NAME   Environment variable containing the target key
+--auth-header NAME   Header name for a custom target credential
+--header-env H=ENV   Read an additional target header from an environment variable
 --config PATH        Use another default YAML file
 --fail-on LEVEL      LOW, MEDIUM, HIGH, or CRITICAL
 --verbose            Enable diagnostic logging
@@ -503,6 +508,61 @@ discovered skill's provenance status. It intentionally omits environment
 values, tool descriptions, raw URLs with query strings, and model responses. For deployed model traffic, put
 the V2 gateway or an organization-approved equivalent in front of the model;
 the pre-deployment report alone cannot enforce a running tool call.
+
+### 6.6.1 Real-world verification run
+
+This is the evidence from `feature/argus-runtime-gateway`, run on 2026-08-04. It uses
+installed agent CLIs and the official MCP filesystem server, not the repository
+mock endpoint:
+
+| Test | What was scanned or contacted | Result |
+| --- | --- | --- |
+| Claude Code 2.1.199 | `$HOME/.claude/settings.local.json` | PASS at the default HIGH gate; one MEDIUM HTTP-endpoint finding |
+| Codex CLI 0.146.0 | `$HOME/.codex/config.toml` | PASS; no findings and no MCP declarations in this file |
+| Gemini CLI 0.49.0 | `$HOME/.gemini/config/config.json` and `config/mcp_config.json` | PASS; no findings and no MCP declarations in those files |
+| Official MCP server 2026.7.10 | `@modelcontextprotocol/server-filesystem` launched over stdio with one temporary directory as its only allowed root | `initialize` and `tools/list` completed; 14 tools were returned; no tool was invoked |
+
+The reproducible static commands were:
+
+```bash
+.venv/bin/python argus.py audit --target "$HOME/.claude/settings.local.json" --output ./reports/real-claude
+.venv/bin/python argus.py audit --target "$HOME/.codex/config.toml" --output ./reports/real-codex
+.venv/bin/python argus.py audit --target "$HOME/.gemini/config/mcp_config.json" --output ./reports/real-gemini-mcp
+```
+
+The MCP runtime check used the official package at a fixed version, sent only
+the MCP `initialize` and `tools/list` requests, and kept the server's allowed
+root under `/tmp`. It did not call `write_file`, `edit_file`, or any other
+side-effecting tool.
+
+The MCP server was started with a fixed package version and an isolated
+temporary directory. Argus also scanned the downloaded package tree. That run
+found that a generic `package.json.repository.url` was being mistaken for an
+MCP endpoint. The rule was narrowed to actual `mcpServers`/`mcp.servers`
+configuration paths, a regression test was added, and the real package scan
+then passed with zero findings. This is exactly the kind of false-positive
+feedback a real integration run should produce before a security tool is used
+in CI.
+
+The live MCP protocol check proves that a real stdio server can start and
+advertise tools. The current Argus static scanner does not yet consume a
+remote server's `tools/list` response automatically; it scans the config or
+server repository and keeps server execution opt-in. For a deployed server,
+capture an authorized tool inventory with the host agent's diagnostic command
+and audit that JSON alongside the server source. Do not claim that a static
+report alone proves the live tool implementation is safe.
+
+No live OpenAI, Anthropic, Gemini API, or Ollama model probe was claimed in this
+run: no API key was available and no Ollama service was running. To produce
+that evidence on another machine, use the provider commands in Section 6.4
+with an endpoint and credentials that the operator is authorized to test.
+
+For first-time users, the safest order is: scan one local config, inspect the
+two report files, run the deterministic endpoint to learn dynamic results,
+then run a real provider or MCP test only after authorization. `PASS` means
+no defined rule crossed the configured gate; it does not mean “secure in every
+possible way.” `BLOCK` means review and remediation are required; `ERROR`
+means the test could not complete and must not be treated as safe.
 
 ## 6.7 Runtime monitoring and blocking gateway (Argus V2)
 
@@ -1131,7 +1191,7 @@ An LLM judge can be inconsistent, expensive, unavailable, or itself influenced b
 
 ### Why sanitize output?
 
-The target model is untrusted. Its output may contain an API key, invisible Unicode, a fake delimiter, or instructions aimed at the judge. `src/utils/sanitization.py` redacts common secrets, removes control and invisible characters, and escapes judge delimiters.
+The target model is untrusted. Its output may contain an API key, invisible Unicode, a fake delimiter, or instructions aimed at the judge. `src/core/sanitization.py` redacts common secrets, removes control and invisible characters, and escapes judge delimiters.
 
 ### Why version and hash attack data?
 
@@ -1438,7 +1498,7 @@ Current limits:
 - token-by-token streaming is not supported; responses are buffered for inspection;
 - the default semantic judge is disabled.
 
-Natural next steps would be a larger curated dataset, pluggable authenticated target adapters, richer workflow schema support, more integration fixtures, gateway authentication/mTLS, distributed audit shipping, and Prometheus/SIEM dashboards. These hardening steps are intentionally separate from the compact local demo.
+Natural next steps would be a larger curated dataset, richer workflow schema support, native authenticated MCP transport adapters, policy-aware tool-call replay, OIDC/mTLS integration, distributed coordination, and Prometheus/SIEM dashboards. These hardening steps are intentionally separate from the compact local demo.
 
 ## 16. Final mental model
 
@@ -1484,9 +1544,10 @@ These are honest V1 limits, not hidden failures:
 
 | Not included | Why it matters |
 | --- | --- |
-| Production-grade runtime operations | V2 includes a useful gateway, but not IAM/mTLS, high availability, distributed state, or SIEM integration |
+| Enterprise runtime operations | V2 includes client-token auth, Caddy TLS, replica topology, approval/audit integrations, and metrics, but not OIDC/mTLS, distributed coordination, or a managed SIEM product |
 | Complete coverage of every agent framework | The rules cover defined patterns and formats, not the whole ecosystem |
-| Automatic target authentication headers | The current target client has no CLI header option; an adapter is needed |
+| Automatic agent login or credential discovery | Target keys and extra headers must be explicitly supplied through environment variables; Argus does not read or reuse an agent's private login database |
+| Full live MCP protocol inspection | Static config/repository scanning is implemented; native authenticated enumeration of every stdio, SSE, and Streamable HTTP server is still a separate adapter |
 | A hosted dashboard or multi-tenant service | Local-first operation keeps the security boundary small |
 | Guaranteed model safety | A finite payload set cannot prove safety against every future attack |
 | Automatic encryption of every report | Sanitized reports and the separate vault utility have different responsibilities |
@@ -1683,6 +1744,6 @@ Before an interview, you should be able to do all of these without opening anoth
 - run the reusable `docker-compose.runtime.yml` with a configured upstream URL;
 - explain why container DNS, TLS/authentication, secret injection, and `stream: false` matter;
 - state at least three limits without pretending they are solved;
-- answer “what would you build next?” with authenticated adapters, broader datasets, gateway authentication/mTLS, distributed audit shipping, and SIEM integration.
+- answer “what would you build next?” with native authenticated MCP transports, broader datasets, OIDC/mTLS integration, distributed coordination, and SIEM dashboards.
 
 If you can do those things, you understand the project rather than merely memorizing its README.

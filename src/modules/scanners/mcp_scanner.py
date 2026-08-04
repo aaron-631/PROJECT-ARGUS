@@ -315,6 +315,17 @@ def _iter_values(value: Any, path: str = "") -> Iterable[tuple[str, Any]]:
             yield from _iter_values(child, f"{path}[{index}]")
 
 
+def _is_mcp_server_location(location: str) -> bool:
+    """Recognize known MCP server registry paths, not generic project URLs."""
+
+    tokens = location.lower().replace("-", "_").split(".")
+    return (
+        "mcpservers" in tokens
+        or "mcp_servers" in tokens
+        or ("mcp" in tokens and any(token in {"server", "servers"} for token in tokens))
+    )
+
+
 @register_scanner
 class MCPScanner(BaseStaticScanner):
     scanner_id = "mcp_scanner"
@@ -1019,6 +1030,7 @@ class MCPScanner(BaseStaticScanner):
                         self._supports("ARGUS_ST_013", path, parsed_document)
                         and isinstance(remote, str)
                         and _REMOTE_RE.search(remote)
+                        and _is_mcp_server_location(location)
                         and not any(verification)
                     ):
                         add("ARGUS_ST_013", path, {"server": remote}, _line_for(raw, remote))

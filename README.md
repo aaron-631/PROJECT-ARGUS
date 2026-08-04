@@ -13,6 +13,27 @@ agent traffic ─> runtime gateway ─> model endpoint
 
 The scanner and gateway are separate on purpose: the scanner decides whether a release is acceptable; the gateway blocks or redacts traffic for a running placement assistant. Argus is not an IAM system, dashboard, SIEM, sandbox, or guarantee of safety.
 
+## First run: choose one path
+
+If you are new to Argus, start with a local configuration audit. It is safe,
+fast, and makes no network call:
+
+```bash
+.venv/bin/python argus.py audit --target ./config --output ./reports/first-run
+```
+
+Open `reports/first-run/report.md`. Then choose the next level:
+
+1. `--target /path/to/agent` checks source, configuration, MCP declarations,
+   tools, and skills.
+2. `--endpoint ...` adds authorized live model probes through `--provider`.
+3. `docker-compose.runtime.yml` puts the runtime gateway in front of a real
+   JSON HTTP model service.
+
+The decision is simple: `PASS` means no defined rule crossed the configured
+threshold, `BLOCK` means findings need review, and `ERROR` means the test could
+not complete. A PASS is not a universal security guarantee.
+
 ## Run it against a real agent repository
 
 ```bash
@@ -176,6 +197,30 @@ intentional: the scan must be safe to run on an untrusted installation. Use
 the V2 runtime gateway for deployed request/tool enforcement.
 
 Only send probes to systems you are authorized to evaluate. See [WORKFLOW.md](WORKFLOW.md) for the complete walkthrough, architecture, design decisions, interview explanation, testing recipes, and troubleshooting guide.
+
+## Audit Claude Code, Codex CLI, or Gemini CLI configuration
+
+Argus does not attach to a running CLI or read conversation history. Point it
+at the configuration and MCP files that the operator chooses to review:
+
+```bash
+.venv/bin/python argus.py audit --target "$HOME/.claude/settings.json" \
+  --output ./reports/claude-code
+.venv/bin/python argus.py audit --target "$HOME/.codex/config.toml" \
+  --output ./reports/codex
+.venv/bin/python argus.py audit --target "$HOME/.gemini/settings.json" \
+  --output ./reports/gemini
+```
+
+Also scan project-level files such as `.claude/settings.json` or
+`.gemini/settings.json`, and any MCP file the CLI actually loads. Paths vary
+by installation and operating system, so confirm the active configuration in
+that tool first. Never point Argus at credential databases, session history,
+or private key stores just to make the scan broader. Gemini's documented
+configuration and MCP locations are described in its [configuration guide](https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md)
+and [MCP guide](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md).
+The real installation and official MCP-server verification results are recorded
+in [WORKFLOW.md](WORKFLOW.md#661-real-world-verification-run).
 
 ## Docker
 
