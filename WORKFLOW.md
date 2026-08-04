@@ -4,6 +4,27 @@ This document is the complete practical guide to Project Argus. It explains what
 
 If you only need a quick command, use `README.md`. If you need to understand the project, use this document from top to bottom.
 
+## Placement mode: how to prepare using only this document
+
+If you are preparing quickly, follow this order:
+
+1. Read Sections 1–3 to understand the problem and the complete flow.
+2. Read Section 5 and run one static scan.
+3. Read Section 6 and run the mock endpoint in two terminals.
+4. Read Section 7 to trace the command through the code.
+5. Read Section 8 to learn the decisions and tradeoffs.
+6. Read Sections 10–11 to explain CI and testing.
+7. Read Sections 12–13 aloud as your interview rehearsal.
+8. Read Sections 17–19 to explain maturity, extensions, limits, and the final project story.
+
+You do not need to memorize every line of Python. You need to understand the responsibility of each layer, the reason for each important decision, and how to prove the behavior with a command or test.
+
+Your basic interview loop should be:
+
+```text
+problem → design → code path → security decision → tradeoff → test evidence → limitation
+```
+
 ## 1. The project in one sentence
 
 Argus is a local-first, pre-deployment security evaluator for LLM applications and autonomous agents: it checks the agent's configuration and optionally probes an authorized endpoint with versioned prompt-injection, jailbreak, and data-extraction tests.
@@ -104,6 +125,62 @@ The main orchestration is in `argus.py` and `src/core/engine.py`.
 | `tests/` | Unit, resilience, contract, and mock-server coverage |
 | `Dockerfile`, `docker-compose.yml` | Reproducible local container workflow |
 | `.github/workflows/ci.yml` | Automated quality and integration checks |
+
+## 4.1 Python and code basics used by Argus
+
+These are the Python ideas you need to explain. Each one exists for a practical reason:
+
+| Python idea | Where it appears | Simple explanation | Why Argus uses it |
+| --- | --- | --- | --- |
+| `argparse` | `argus.py` | Reads command-line flags | Makes the scanner usable locally and in CI |
+| `async def` / `await` | `engine.py`, target client | Runs waiting network work without blocking every other request | Allows several bounded probes to run efficiently |
+| `asyncio.Semaphore` | `engine.py` | A counter that limits how many tasks enter a section | Prevents too many simultaneous requests |
+| `Protocol` | `target_client.py` | Describes the methods an object must provide | Lets tests inject a fake target instead of using a real network |
+| Abstract base class | `interfaces/` | Defines a contract for an extension | Keeps scanners, attacks, judges, and exporters consistent |
+| Decorator | `@register_scanner`, `@register_attack_module` | Runs registration code when a class is defined | Gives modules stable IDs and controlled discovery |
+| Pydantic model | `models/domain.py`, `models/config.py` | Validates Python data against fields and bounds | Prevents malformed findings and reports |
+| AST | `ast.parse()` in document parsing | Represents Python code as a structured tree | Detects unsafe calls without relying only on text matching |
+| `pathlib` | ingress and reporting | Safe, readable filesystem paths | Prevents path confusion and keeps file handling portable |
+| `hashlib.sha256` | ingress and datasets | Creates a content fingerprint | Makes files and attack payloads reproducible |
+| `subprocess.run` | Git ingestion | Runs a controlled external command | Supports shallow repository scans with hooks disabled |
+| `AESGCM` | `utils/crypto.py` | Encrypts and authenticates data | Protects optional sensitive vault artifacts |
+| Pytest fixtures/fakes | `tests/` | Replaces real dependencies with predictable ones | Makes security and failure tests repeatable |
+
+The simplest code trace is:
+
+```text
+python argus.py scan
+      ↓
+build_parser() → run_scan()
+      ↓
+load_config() + ingest()
+      ↓
+ArgusEngine.run()
+      ↓
+_run_scanners() + optional _run_attacks()
+      ↓
+EvaluationPipeline + risk engine
+      ↓
+JSONExporter + MarkdownExporter
+      ↓
+exit code 0, 1, 2, or 10
+```
+
+When asked “where does X happen?”, use this map:
+
+| Question | Answer in the code |
+| --- | --- |
+| Where does the command start? | `argus.py:main()` |
+| Where are config and profiles loaded? | `src/core/config.py:load_config()` |
+| Where are files safely read? | `src/core/ingress.py:ingest_local()` |
+| Where are formats parsed? | `src/core/documents.py:parse_file()` |
+| Where are modules selected? | `src/core/registry.py:get_enabled_modules()` |
+| Where are static rules run? | `src/core/engine.py:_run_scanners()` and `MCPScanner.scan()` |
+| Where are HTTP attacks run? | `src/core/engine.py:_run_attacks()` and `_attack_one()` |
+| Where is the response judged? | `src/core/evaluation.py:EvaluationPipeline.evaluate()` |
+| Where is risk calculated? | `src/core/risk_engine.py:calculate_risk()` |
+| Where are reports written? | `argus.py:_write_reports()` and `src/reporting/exporters.py` |
+| Where is the CI decision made? | `argus.py:_exit_for_results()` |
 
 ## 5. Installation and first scan
 
@@ -638,6 +715,24 @@ export ARGUS_VAULT_KEY='paste-generated-key-here'
 
 The tests demonstrate round trips, tamper detection, missing-key failure, and key rotation.
 
+### Decision cheat sheet for interviews
+
+| Problem | Argus decision | Benefit | Tradeoff |
+| --- | --- | --- | --- |
+| Sensitive code may leave the company | Start local-first with a null judge | Private, cheap, easy to run | Less semantic understanding by default |
+| Dynamic probes can affect a service | Require an explicit endpoint | No surprise network calls | Users can forget to enable dynamic testing |
+| Regex can misunderstand code | Use AST and structured parsing | Fewer obvious false positives | More implementation work and format limits |
+| A model judge can be wrong | Canonical signals stay authoritative | Repeatable CI result | Some nuanced behavior is missed |
+| Live endpoints can throttle | Use rate limits, retries, and backoff | Safer and more reliable probing | Scans can take longer |
+| Risk depends on business context | Use explicit profiles and `c_env` | Reviewable business assumption | A profile is still a human judgment |
+| Reports are consumed by automation | Validate Pydantic models and schemas | Stable contracts and early errors | Schema changes require maintenance |
+| Target output is untrusted | Sanitize and omit raw responses | Lower leakage and prompt-manipulation risk | Less raw forensic detail in normal reports |
+| Attack data may change | Version and hash the dataset | Reproducible security coverage | Updating payloads requires a manifest change |
+| CI needs a simple result | Return exit code `10` for a gate failure | Easy pipeline integration | A security finding can look like a failed command until the report is read |
+| The project must grow safely | Use explicit registry contracts | Controlled extension points | New plugins need deliberate wiring |
+
+For every decision, say both halves. For example: “We chose a local null judge for privacy and repeatability; the tradeoff is that it catches fewer semantic edge cases, so we made an HTTP judge optional.” That answer sounds stronger than claiming the design has no downside.
+
 ## 9. Docker and deployment workflow
 
 The Dockerfile:
@@ -1080,3 +1175,26 @@ CLI
 ### Closing sentence
 
 “The important engineering decision was to make the safe path deterministic and local, then make network and semantic behavior optional. That gives teams a useful deployment gate without forcing them to send sensitive agent data to a third party.”
+
+## 20. Final placement-readiness checklist
+
+Before an interview, you should be able to do all of these without opening another document:
+
+- explain Argus in 30 seconds;
+- draw the CLI → config → ingress → scanner/attacks → evaluator → report flow;
+- run a static scan and find the two output files;
+- start the mock and run a live scan in two terminals;
+- explain why the demo uses `--fail-on CRITICAL`;
+- explain why a normal high-risk result returns `10` instead of `1`;
+- name the three attack families;
+- explain one static rule from input to finding to remediation;
+- calculate one risk example using `R = (S_base * C_env) * P_conf`;
+- explain why the default judge is null and why the HTTP judge is optional;
+- explain how the target output is sanitized;
+- explain how retries and rate limits protect the target;
+- name at least three tests and what each proves;
+- explain the Docker mock entrypoint and health check;
+- state at least three limits without pretending they are solved;
+- answer “what would you build next?” with authenticated adapters, broader datasets, and runtime monitoring as separate future work.
+
+If you can do those things, you understand the project rather than merely memorizing its README.
