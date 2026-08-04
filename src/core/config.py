@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,21 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return result
 
 
+def _default_config_path() -> Path:
+    """Find repository or installed-package defaults without using cwd only."""
+
+    relative = Path("config/default_config.yaml")
+    candidates = (
+        relative,
+        Path(__file__).resolve().parents[2] / relative,
+        Path(sys.prefix) / relative,
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return relative
+
+
 def load_config(
     profile: str = "default",
     config_path: str | Path | None = None,
@@ -53,7 +69,7 @@ def load_config(
 
     if not profile or Path(profile).name != profile or profile in {".", ".."}:
         raise ConfigurationError("profile must be a simple profile name")
-    config_file = Path(config_path or "config/default_config.yaml")
+    config_file = Path(config_path) if config_path else _default_config_path()
     profiles_root = Path(profiles_dir or config_file.parent / "profiles")
     merged = _read_yaml(config_file)
     profile_data: dict[str, Any] = {}

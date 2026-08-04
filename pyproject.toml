@@ -16,6 +16,35 @@ dependencies = [
     "jsonschema>=4.21.0",
 ]
 
+[project.scripts]
+argus = "argus:main"
+argus-runtime = "runtime_gateway:main"
+
+[tool.setuptools]
+py-modules = ["argus", "runtime_gateway"]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[tool.setuptools.package-data]
+"src.models" = ["*.json"]
+
+[tool.setuptools.data-files]
+"config" = ["config/default_config.yaml"]
+"config/profiles" = ["config/profiles/banking_agent.yaml", "config/profiles/public_faq.yaml"]
+"config/runtime" = ["config/runtime/placement_agent.yaml"]
+"data/attacks" = ["data/attacks/manifest.json"]
+"data/attacks/data_extraction/partial_leakage" = [
+    "data/attacks/data_extraction/partial_leakage/payloads.json"
+]
+"data/attacks/jailbreaks/hypothetical_scenarios" = [
+    "data/attacks/jailbreaks/hypothetical_scenarios/payloads.json"
+]
+"data/attacks/prompt_injection/direct_system_override" = [
+    "data/attacks/prompt_injection/direct_system_override/payloads.json"
+]
+
 [tool.black]
 line-length = 100
 

@@ -12,9 +12,7 @@ from src.runtime.gateway import create_app
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Argus runtime policy gateway")
-    parser.add_argument(
-        "--config", default="config/runtime/placement_agent.yaml", help="Runtime YAML configuration"
-    )
+    parser.add_argument("--config", default=None, help="Runtime YAML configuration")
     parser.add_argument("--host", default=None, help="Override the listening host")
     parser.add_argument("--port", type=int, default=None, help="Override the listening port")
     return parser

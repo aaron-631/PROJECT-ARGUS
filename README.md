@@ -16,7 +16,8 @@ an IAM system, sandbox, SIEM, or universal guarantee of safety.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python argus.py audit --target ./config --output ./reports/first-run
+.venv/bin/pip install -e .
+.venv/bin/argus audit --target ./config --output ./reports/first-run
 ```
 
 Open `reports/first-run/report.md`. `PASS` means no configured rule crossed the
@@ -30,9 +31,9 @@ code walkthrough, decisions, tradeoffs, interview preparation, and limits, use
 
 | Goal | Command | Network/process behavior |
 | --- | --- | --- |
-| Review a repository, config, MCP definitions, or skills | `argus.py audit --target PATH` | Static; launches nothing |
-| Test an authorized live LLM endpoint | `argus.py audit --target PATH --endpoint URL ...` | Bounded behavior probes |
-| Inspect a live MCP server | `argus.py mcp-probe --transport ... --confirm-live` | `initialize` + paginated `tools/list`; zero tool calls |
+| Review a repository, config, MCP definitions, or skills | `argus audit --target PATH` | Static; launches nothing |
+| Test an authorized live LLM endpoint | `argus audit --target PATH --endpoint URL ...` | Bounded behavior probes |
+| Inspect a live MCP server | `argus mcp-probe --transport ... --confirm-live` | `initialize` + paginated `tools/list`; zero tool calls |
 | Protect deployed model traffic | `docker-compose.runtime.yml` | Runtime allow/block/redact gateway |
 
 Detailed guides: [static and dynamic testing](WORKFLOW.md#6-real-time-dynamic-testing),
@@ -43,7 +44,7 @@ Detailed guides: [static and dynamic testing](WORKFLOW.md#6-real-time-dynamic-te
 ## Scan a real agent repository
 
 ```bash
-.venv/bin/python argus.py audit \
+.venv/bin/argus audit \
   --target /path/to/agent-repository \
   --output ./reports/agent
 ```
@@ -53,13 +54,15 @@ servers, tool schemas, permissions, egress, TLS, unpinned packages, and skills.
 Use a profile when business context changes the risk:
 
 ```bash
-.venv/bin/python argus.py audit \
+.venv/bin/argus audit \
   --target /path/to/agent-repository \
   --profile banking_agent \
   --output ./reports/banking-agent
 ```
 
-Reports are `report.json` and `report.md`. `audit` and `scan` are aliases.
+Reports are `report.json` and `report.md`. `audit` and `scan` are aliases. The
+editable install exposes `argus` and `argus-runtime`; the `python argus.py`
+form remains available when running directly from a clone.
 
 ## Test a live LLM endpoint
 
@@ -68,7 +71,7 @@ written to reports:
 
 ```bash
 export OPENAI_API_KEY='...'
-.venv/bin/python argus.py audit \
+.venv/bin/argus audit \
   --target /path/to/agent-repository \
   --endpoint https://api.openai.com/v1/chat/completions \
   --provider openai \
@@ -85,7 +88,7 @@ not a passing result.
 For a real, reviewed stdio server:
 
 ```bash
-.venv/bin/python argus.py mcp-probe \
+.venv/bin/argus mcp-probe \
   --transport stdio \
   --command npx \
   --arg=-y \
@@ -100,7 +103,7 @@ For an authorized Streamable HTTP server:
 
 ```bash
 export MCP_AUTHORIZATION='Bearer read-only-probe-token'
-.venv/bin/python argus.py mcp-probe \
+.venv/bin/argus mcp-probe \
   --transport streamable-http \
   --endpoint https://mcp.company.example/mcp \
   --header-env Authorization=MCP_AUTHORIZATION \
@@ -123,10 +126,10 @@ and the [recorded real-server report](WORKFLOW.md#661-real-world-verification-ru
 Point Argus at the configuration and skill directories chosen by the operator:
 
 ```bash
-.venv/bin/python argus.py audit --target "$HOME/.openclaw" --output ./reports/openclaw
-.venv/bin/python argus.py audit --target "$HOME/.claude/settings.json" --output ./reports/claude
-.venv/bin/python argus.py audit --target "$HOME/.codex/config.toml" --output ./reports/codex
-.venv/bin/python argus.py audit --target "$HOME/.gemini/settings.json" --output ./reports/gemini
+.venv/bin/argus audit --target "$HOME/.openclaw" --output ./reports/openclaw
+.venv/bin/argus audit --target "$HOME/.claude/settings.json" --output ./reports/claude
+.venv/bin/argus audit --target "$HOME/.codex/config.toml" --output ./reports/codex
+.venv/bin/argus audit --target "$HOME/.gemini/settings.json" --output ./reports/gemini
 ```
 
 Paths vary by version and operating system. Confirm the active config first;
@@ -166,6 +169,7 @@ acceptance procedure is in [POC.md](POC.md).
 
 | Evidence | Recorded result |
 | --- | --- |
+| Installable CLI | Editable package install succeeded; `argus` and `argus-runtime` help commands work |
 | Automated quality gate | 53 tests passed; Black, Flake8, mypy, and schema checks passed |
 | Real agent tooling | Claude Code, Codex CLI, and Gemini CLI configuration files were scanned |
 | Real MCP server | Official pinned filesystem server: 14 tools, 1 page, 0 tool calls, 2 HIGH findings, `BLOCK` |

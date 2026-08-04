@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,14 @@ class DatasetError(ValueError):
     """Raised when a payload manifest or payload file is not trustworthy."""
 
 
-_DATA_ROOT = Path(__file__).resolve().parents[3] / "data" / "attacks"
+_DATA_ROOT_CANDIDATES = (
+    Path(__file__).resolve().parents[3] / "data" / "attacks",
+    Path(sys.prefix) / "data" / "attacks",
+)
+_DATA_ROOT = next(
+    (candidate for candidate in _DATA_ROOT_CANDIDATES if candidate.is_dir()),
+    _DATA_ROOT_CANDIDATES[0],
+)
 _MANIFEST = _DATA_ROOT / "manifest.json"
 
 

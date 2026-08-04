@@ -11,6 +11,9 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
+      - run: pip install --no-build-isolation --no-deps -e .
+      - run: argus --help
+      - run: argus-runtime --help
       - run: black --check --target-version py311 src/ tests/ argus.py runtime_gateway.py
       - run: flake8 src/ tests/ argus.py runtime_gateway.py
       - run: mypy src/

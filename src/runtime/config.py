@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,19 @@ from .models import RuntimeConfig
 
 class RuntimeConfigurationError(ValueError):
     """Raised when runtime gateway configuration is invalid."""
+
+
+def _default_runtime_config_path() -> Path:
+    relative = Path("config/runtime/placement_agent.yaml")
+    candidates = (
+        relative,
+        Path(__file__).resolve().parents[2] / relative,
+        Path(sys.prefix) / relative,
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return relative
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -26,12 +40,13 @@ def _read_yaml(path: Path) -> dict[str, Any]:
 
 
 def load_runtime_config(
-    path: str | Path = "config/runtime/placement_agent.yaml",
+    path: str | Path | None = None,
     environ: dict[str, str] | None = None,
 ) -> RuntimeConfig:
     """Load the runtime config and apply only deployment-safe overrides."""
 
-    merged = _read_yaml(Path(path))
+    config_path = Path(path) if path else _default_runtime_config_path()
+    merged = _read_yaml(config_path)
     env = environ if environ is not None else os.environ
     if env.get("ARGUS_RUNTIME_UPSTREAM_URL"):
         merged["upstream_url"] = env["ARGUS_RUNTIME_UPSTREAM_URL"]

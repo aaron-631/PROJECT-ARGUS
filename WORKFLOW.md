@@ -115,6 +115,7 @@ The main orchestration is in `argus.py` and `src/core/engine.py`.
 | Path | Responsibility |
 | --- | --- |
 | `argus.py` | CLI parser, scan lifecycle, report writing, exit codes |
+| `pyproject.toml` | Installable package metadata, CLI entrypoints, and bundled defaults |
 | `POC.md` | Copy-paste proof-of-concept run and acceptance evidence |
 | `config/default_config.yaml` | Default engine, report, judge, vault, scanner, and attack settings |
 | `config/profiles/` | Explicit deployment-context profiles |
@@ -210,15 +211,21 @@ Argus requires Python 3.11 or newer. The repository uses a virtual environment s
 cd PROJECT-ARGUS
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e .
 ```
 
 Run a static scan:
 
 ```bash
-.venv/bin/python argus.py scan \
+.venv/bin/argus scan \
   --target ./config \
   --output ./reports/static
 ```
+
+The editable install exposes two commands: `argus` for scanning and probing,
+and `argus-runtime` for the V2 gateway. Direct `python argus.py` and
+`python runtime_gateway.py` invocation remains supported for Docker and
+source-only environments.
 
 The `--target` argument is required. It can be a local file, local directory, or an HTTP(S)/SSH/Git URL. A local scan does not contact an AI endpoint unless `--endpoint` is supplied or `ARGUS_TARGET_ENDPOINT` is set.
 
@@ -1437,16 +1444,17 @@ docker compose down
 
 1. check out the repository;
 2. install Python 3.11 dependencies;
-3. run Black formatting checks;
-4. run Flake8;
-5. run mypy;
-6. run the test suite;
-7. verify generated JSON Schemas;
-8. start the local mock and run an integration scan;
-9. build the Docker image;
-10. validate both the repository demo Compose file and the reusable runtime Compose file;
-11. start `mock` and the runtime gateway, then test health, request blocking, forwarding, and metrics;
-12. start the full Compose deployment and require the Argus service to exit successfully.
+3. install the editable package and verify `argus`/`argus-runtime` entrypoints;
+4. run Black formatting checks;
+5. run Flake8;
+6. run mypy;
+7. run the test suite;
+8. verify generated JSON Schemas;
+9. start the local mock and run an integration scan;
+10. build the Docker image;
+11. validate both the repository demo Compose file and the reusable runtime Compose file;
+12. start `mock` and the runtime gateway, then test health, request blocking, forwarding, and metrics;
+13. start the full Compose deployment and require the Argus service to exit successfully.
 
 The mock integration command uses:
 

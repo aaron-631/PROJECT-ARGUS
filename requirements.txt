@@ -1,6 +1,9 @@
 # Async
 aiohttp>=3.9.0
 
+# Packaging and CLI installation
+setuptools>=68.0
+
 # Runtime validation
 pydantic>=2.7.0,<3
 
@@ -10,9 +13,6 @@ cryptography>=42.0.0
 # Config
 pyyaml>=6.0.1
 json5>=0.9.25
-
-# CLI
-click>=8.1.7
 
 # Testing
 pytest>=8.0.0

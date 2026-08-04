@@ -25,6 +25,7 @@ Create the environment from the repository root:
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e .
 mkdir -p reports/poc poc-mcp-root
 ```
 
@@ -33,7 +34,7 @@ mkdir -p reports/poc poc-mcp-root
 This step is safe: it reads files and starts no agent, model, or MCP server.
 
 ```bash
-.venv/bin/python argus.py audit \
+.venv/bin/argus audit \
   --target ./config \
   --output ./reports/poc/static
 ```
@@ -58,7 +59,7 @@ Terminal 1:
 Terminal 2:
 
 ```bash
-.venv/bin/python argus.py audit \
+.venv/bin/argus audit \
   --target ./config \
   --endpoint http://127.0.0.1:8765/v1/messages \
   --fail-on CRITICAL \
@@ -89,7 +90,7 @@ sends `initialize`, `notifications/initialized`, and paginated `tools/list`.
 It never sends `tools/call`.
 
 ```bash
-.venv/bin/python argus.py mcp-probe \
+.venv/bin/argus mcp-probe \
   --transport stdio \
   --command npx \
   --arg=-y \
