@@ -200,7 +200,8 @@ For GitHub Code Scanning, upload the generated SARIF artifact from CI:
 <summary>Captured real Argus run — 2026-08-04</summary>
 
 Environment: Linux workspace, Python 3.14.4, Node.js v24.15.0, npm 11.16.0,
-merged `main`, commit `7b9a22f`.
+source commit `7b9a22f` (the later `main` update only refreshed this evidence
+wording; executable code was unchanged).
 
 ```text
 $ .venv/bin/argus mcp-probe \
