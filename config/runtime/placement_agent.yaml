@@ -1,0 +1,35 @@
+# Practical policy for a campus-placement assistant.
+# The upstream URL is overridden by ARGUS_RUNTIME_UPSTREAM_URL in Compose.
+upstream_url: http://127.0.0.1:8765/v1/messages
+listen_host: 127.0.0.1
+listen_port: 8080
+max_body_bytes: 1048576
+request_timeout_seconds: 30
+approval_header: X-Argus-Approval-Token
+approval_token_env: ARGUS_RUNTIME_APPROVAL_TOKEN
+audit_path: ./runtime-audit/events.jsonl
+audit_hmac_key_env: ARGUS_RUNTIME_AUDIT_KEY
+
+policy:
+  block_prompt_patterns:
+    - "ignore\\s+(?:all\\s+)?previous\\s+instructions"
+    - "reveal\\s+(?:the\\s+)?(?:hidden\\s+)?system\\s+prompt"
+    - "show\\s+(?:me\\s+)?the\\s+developer\\s+message"
+    - "disable\\s+(?:your\\s+)?safety"
+  block_tools:
+    - "delete*"
+    - "drop*"
+    - "truncate*"
+    - "wipe*"
+    - export_all_student_data
+  approval_tools:
+    - update_student_record
+    - send_external_email
+    - issue_offer
+  allowed_email_domains:
+    - university.edu
+  block_output_patterns:
+    - "-----BEGIN\\s+[^-]+-----"
+    - "\\b(?:sk|pk)_(?:live|test)_[A-Za-z0-9_-]{12,}\\b"
+    - "(?i)\\b(?:api[_-]?key|password|secret)\\s*[:=]\\s*\\S+"
+  redact_personal_data: true

@@ -3,6 +3,7 @@
 
 # Reports
 reports/
+runtime-audit/
 
 # Python
 __pycache__/

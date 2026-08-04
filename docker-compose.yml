@@ -25,3 +25,19 @@ services:
       - ./.vault:/app/.vault
     environment:
       - ARGUS_TARGET_ENDPOINT=http://mock:8765/v1/messages
+
+  runtime:
+    build: .
+    entrypoint: ["python", "runtime_gateway.py"]
+    command: ["--config", "/app/config/runtime/placement_agent.yaml", "--host", "0.0.0.0"]
+    depends_on:
+      mock:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/app/config:ro
+      - ./runtime-audit:/app/runtime-audit
+    environment:
+      - ARGUS_RUNTIME_UPSTREAM_URL=http://mock:8765/v1/messages
+      - ARGUS_RUNTIME_AUDIT_PATH=/app/runtime-audit/events.jsonl

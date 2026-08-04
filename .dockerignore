@@ -4,4 +4,5 @@ __pycache__
 *.pyc
 .vault
 reports
+runtime-audit
 tests/__pycache__

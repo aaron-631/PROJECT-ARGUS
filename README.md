@@ -1,16 +1,17 @@
 # Project Argus
 
-Argus is a local-first security check for AI agents before deployment. It scans an agent's files and, when explicitly asked, sends safe test prompts to an authorized AI endpoint.
+Argus is a local-first security toolkit for AI agents. It has two layers: a pre-deployment scanner for repositories and an optional runtime gateway that enforces request/response policies while an agent is live.
 
-Think of it as a pre-deployment security gate:
+Think of it as two gates: a pre-deployment release gate and an optional live-traffic policy gate:
 
 ```text
 agent files ──> static checks ──┐
                                 ├──> JSON/Markdown report ──> CI decision
 running AI endpoint ─> attacks ─┘
+agent traffic ─> runtime gateway ─> model endpoint
 ```
 
-Argus is not a runtime firewall, IAM system, dashboard, or production monitoring service.
+The scanner and gateway are separate on purpose: the scanner decides whether a release is acceptable; the gateway blocks or redacts traffic for a running placement assistant. Argus is not an IAM system, dashboard, SIEM, sandbox, or guarantee of safety.
 
 ## Run it
 
@@ -65,11 +66,24 @@ docker compose up --build --abort-on-container-exit --exit-code-from argus
 
 This starts the local mock endpoint, waits for it to become healthy, runs Argus, and writes reports to `./reports`.
 
+## Runtime gateway (V2)
+
+The practical campus-placement demo puts the agent behind a policy gateway. It blocks prompt injection and dangerous tools, requires approval for record updates/offers/email, restricts external email domains, redacts student contact data, and records sanitized audit events.
+
+```bash
+docker compose up --build -d mock runtime
+curl --fail http://127.0.0.1:8080/healthz
+curl --fail http://127.0.0.1:8080/metrics
+docker compose down
+```
+
+The gateway listens on `POST /v1/messages` and forwards allowed requests to the configured upstream. See [WORKFLOW.md](WORKFLOW.md) for the policy examples, approval flow, audit format, tradeoffs, and real-time testing walkthrough.
+
 ## CI and development checks
 
 ```bash
-.venv/bin/black --check --target-version py311 src/ tests/ argus.py
-.venv/bin/flake8 src/ tests/ argus.py
+.venv/bin/black --check --target-version py311 src/ tests/ argus.py runtime_gateway.py
+.venv/bin/flake8 src/ tests/ argus.py runtime_gateway.py
 PYTHONPATH=. .venv/bin/mypy src/
 PYTHONPATH=. .venv/bin/pytest -q
 PYTHONPATH=. .venv/bin/python -m src.models.schema_generation --check
@@ -79,6 +93,6 @@ The GitHub Actions workflow runs these checks plus a local mock integration scan
 
 ## Scope
 
-Argus V1 checks configuration posture and model behavior before deployment. It does not guarantee safety, replace human review, or protect a live system after deployment. Dynamic testing is opt-in, local attack data is versioned and hashed, and the default judge is air-gapped.
+Argus V1 checks configuration posture and model behavior before deployment. Argus V2 optionally protects live traffic with a small provider-neutral gateway. Both layers are fail-closed for their defined policies but do not guarantee safety or replace human review. Dynamic testing is opt-in, local attack data is versioned and hashed, and the default judge is air-gapped.
 
 For the reasoning behind the design, read [WORKFLOW.md](WORKFLOW.md).
