@@ -14,6 +14,7 @@ from time import perf_counter
 from pathlib import Path
 
 from src.core.config import ConfigurationError, load_config
+from src.core.baseline import apply_baseline
 from src.core.doctor import run_doctor
 from src.core.engine import ArgusEngine
 from src.core.ingress import IngressError, ingest
@@ -62,6 +63,11 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--target", required=True, help="Local path or Git URL")
     scan_parser.add_argument("--profile", default="default", help="Configuration profile name")
     scan_parser.add_argument("--output", default=None, help="Report output directory")
+    scan_parser.add_argument(
+        "--baseline",
+        default=None,
+        help="Compare with a previous report.json and fail only on new regressions",
+    )
     scan_parser.add_argument(
         "--endpoint", default=None, help="Explicitly enable dynamic testing at this endpoint"
     )
@@ -141,6 +147,11 @@ def build_parser() -> argparse.ArgumentParser:
     probe_parser.add_argument("--max-tool-bytes", type=int, default=100_000)
     probe_parser.add_argument("--profile", default="default", help="Configuration profile name")
     probe_parser.add_argument("--output", default=None, help="Report output directory")
+    probe_parser.add_argument(
+        "--baseline",
+        default=None,
+        help="Compare with a previous report.json and fail only on new regressions",
+    )
     probe_parser.add_argument("--config", default=None, help="Path to default YAML configuration")
     probe_parser.add_argument(
         "--fail-on", choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"], default=None
@@ -171,6 +182,14 @@ def _write_reports(results: dict, config, output: str | None) -> list[Path]:
 def _exit_for_results(results: dict, fail_on: str) -> int:
     if results.get("summary", {}).get("decision") == "ERROR":
         return EXIT_ERROR
+    baseline = results.get("summary", {}).get("baseline")
+    if isinstance(baseline, dict):
+        if baseline.get("gate") == "BLOCK":
+            return EXIT_FINDINGS
+        if baseline.get("gate") == "ERROR":
+            return EXIT_ERROR
+        if baseline.get("gate") == "PASS":
+            return EXIT_OK
     threshold = _SEVERITY_ORDER[fail_on]
     for finding in results.get("findings", []):
         if _SEVERITY_ORDER.get(str(finding.get("severity", "LOW")), 0) >= threshold:
@@ -256,6 +275,15 @@ def _print_summary(
         print("[Argus] Live probes: not run (no --endpoint or ARGUS_TARGET_ENDPOINT)")
     if errors:
         print(f"[Argus] Execution notes: {len(errors)}")
+    baseline = summary.get("baseline")
+    if isinstance(baseline, dict):
+        print(
+            "[Argus] Baseline: "
+            f"{baseline.get('gate', 'UNKNOWN')} "
+            f"(new findings={baseline.get('new_finding_count', 0)}, "
+            f"severity increases={baseline.get('changed_finding_count', 0)}, "
+            f"new attack failures={baseline.get('new_attack_failure_count', 0)})"
+        )
     performance = summary.get("performance")
     if isinstance(performance, dict):
         elapsed = performance.get("elapsed_seconds")
@@ -296,6 +324,8 @@ def run_scan(args: argparse.Namespace) -> int:
         "evaluation_seconds": round(evaluation_seconds, 3),
         "elapsed_seconds": round(perf_counter() - operation_started, 3),
     }
+    if args.baseline:
+        apply_baseline(results, args.baseline)
     written = _write_reports(results, config, args.output)
     fail_on = args.fail_on or config.reporting.fail_on
     exit_code = _exit_for_results(results, fail_on)
@@ -365,6 +395,8 @@ def _run_mcp_probe_report(
     if error:
         results["summary"].setdefault("errors", []).append(error)
         results["summary"]["decision"] = "ERROR"
+    if args.baseline and not error:
+        apply_baseline(results, args.baseline)
     written = _write_reports(results, config, args.output)
     return written, results
 

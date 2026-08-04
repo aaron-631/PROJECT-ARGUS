@@ -117,6 +117,7 @@ The main orchestration is in `argus.py` and `src/core/engine.py`.
 | `argus.py` | CLI parser, scan lifecycle, report writing, exit codes |
 | `pyproject.toml` | Installable package metadata, CLI entrypoints, and bundled defaults |
 | `requirements.lock` | Exact verified dependency graph for repeatable CI/local installs |
+| `requirements-dev.txt` | Locked application dependencies plus the pinned dependency-audit tool |
 | `POC.md` | Copy-paste proof-of-concept run and acceptance evidence |
 | `config/default_config.yaml` | Default engine, report, judge, vault, scanner, and attack settings |
 | `config/profiles/` | Explicit deployment-context profiles |
@@ -141,6 +142,10 @@ The main orchestration is in `argus.py` and `src/core/engine.py`.
 | `src/models/domain.py` | Pydantic source-of-truth domain models |
 | `src/models/*.json` | Generated JSON Schema artifacts |
 | `src/reporting/` | JSON, Markdown, and SARIF report generation |
+| `src/core/baseline.py` | Baseline comparison for new and escalated risk |
+| `examples/vulnerable-agent/` | Safe intentionally vulnerable first-run fixture |
+| `scripts/demo.py` | Cross-platform deterministic portfolio demo |
+| `docs/architecture.md` | Compact trust-boundary and data-flow diagram |
 | `src/core/sanitization.py` | Secret redaction and untrusted-output cleanup |
 | `src/utils/crypto.py` | Optional AES-256-GCM vault utility |
 | `src/utils/validators.py` | Reusable score, path, and JSON Schema validation helpers |
@@ -257,8 +262,25 @@ Useful options:
 --header-env H=ENV   Read an additional target header from an environment variable
 --config PATH        Use another default YAML file
 --fail-on LEVEL      LOW, MEDIUM, HIGH, or CRITICAL
+--baseline PATH      Compare with a previous report.json and gate regressions
 --verbose            Enable diagnostic logging
 ```
+
+### Baseline diff mode
+
+Use a previous `report.json` when a team has an existing backlog:
+
+```bash
+.venv/bin/argus audit \
+  --target ./agent-repository \
+  --baseline ./reports/accepted/report.json \
+  --output ./reports/current
+```
+
+The current findings remain visible. The baseline gate passes only when there
+are no new findings, severity increases, or newly unsafe dynamic probes. It
+records resolved findings as progress. Exit code `0` means no regression,
+`10` means a new or escalated finding, and `1` means the scan did not complete.
 
 Every default scan also writes `report.sarif`. It maps Argus rule IDs to SARIF
 results with GitHub-compatible severity, relative file locations, remediation,
@@ -1505,6 +1527,12 @@ docker compose down
 13. start `mock` and the runtime gateway, then test health, request blocking, forwarding, and metrics;
 14. start the full Compose deployment and require the Argus service to exit successfully.
 
+`.github/workflows/compatibility.yml` keeps the portable checks small and runs
+them on Ubuntu, Windows, and macOS across Python 3.11–3.13. The Linux workflow
+also runs `pip-audit`, emits a CycloneDX dependency SBOM, and performs an
+advisory high/critical Docker image scan with Trivy. The application lock stays
+separate from the tool used to audit it.
+
 The mock integration command uses:
 
 ```bash
@@ -1565,6 +1593,10 @@ This is a good unit-testing decision: the engine is tested deterministically, wh
 ## 12. How to demonstrate the project in five minutes
 
 Use this sequence in a placement interview:
+
+For a one-command safe rehearsal, run `python scripts/demo.py`; it uses the
+intentionally vulnerable fixture and local mock, then writes all evidence under
+`reports/demo/`. The real MCP option is explicit and documented in Section 6.6.
 
 ### Minute 1: Explain the problem
 
@@ -1938,7 +1970,11 @@ Before an interview, you should be able to do all of these without opening anoth
 - explain how the target output is sanitized;
 - explain how retries and rate limits protect the target;
 - run `argus doctor` and explain which missing tools are warnings versus blockers;
+- run `python scripts/demo.py` and explain why its expected `BLOCK` is success evidence;
+- use `--baseline` and explain why existing findings remain visible but do not block regressions;
 - inspect `report.sarif` and explain how GitHub Code Scanning consumes it;
+- open `evidence/real-mcp/` and explain the provenance and redaction choices;
+- explain why compatibility and dependency-audit checks are separate from the Docker integration job;
 - quote the measured static and MCP timings while stating that they are host-specific;
 - name at least three tests and what each proves;
 - explain the Docker mock entrypoint and health check;

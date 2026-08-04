@@ -5,7 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "argus-framework"
 version = "0.1.0"
-description = "Enterprise-grade AI security evaluation framework for LLMs and autonomous agent ecosystems"
+description = "Local-first security evaluation and runtime policy gateway for AI agents, MCP servers, skills, and LLM deployments"
+readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.11"
 dependencies = [
     "aiohttp>=3.9.0",

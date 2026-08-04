@@ -28,7 +28,17 @@ the flexible lower-bound dependency path.
 
 For the complete proof-of-concept, use [POC.md](POC.md). For the architecture,
 code walkthrough, decisions, tradeoffs, interview preparation, and limits, use
-[WORKFLOW.md](WORKFLOW.md).
+[WORKFLOW.md](WORKFLOW.md). The compact architecture diagram is in
+[docs/architecture.md](docs/architecture.md).
+
+The fastest safe portfolio demo after installation is:
+
+```bash
+python scripts/demo.py
+```
+
+It writes evidence under `reports/demo/`. Add `--live-mcp` only when you have
+explicitly authorized the pinned MCP demo server.
 
 ## Choose the right command
 
@@ -36,6 +46,7 @@ code walkthrough, decisions, tradeoffs, interview preparation, and limits, use
 | --- | --- | --- |
 | Check the local setup | `argus doctor` | Read-only checks; does not contact a model or MCP server |
 | Review a repository, config, MCP definitions, or skills | `argus audit --target PATH` | Static; launches nothing |
+| Gate only new regressions | `argus audit --target PATH --baseline report.json` | Compares against an accepted report |
 | Test an authorized live LLM endpoint | `argus audit --target PATH --endpoint URL ...` | Bounded behavior probes |
 | Inspect a live MCP server | `argus mcp-probe --transport ... --confirm-live` | `initialize` + paginated `tools/list`; zero tool calls |
 | Protect deployed model traffic | `docker-compose.runtime.yml` | Runtime allow/block/redact gateway |
@@ -68,6 +79,11 @@ Reports are `report.json`, `report.md`, and `report.sarif`. SARIF can be uploade
 to GitHub Code Scanning. `audit` and `scan` are aliases. The
 editable install exposes `argus` and `argus-runtime`; the `python argus.py`
 form remains available when running directly from a clone.
+
+For an existing backlog, `--baseline report.json` keeps all current findings in
+the report but fails only on new findings, severity increases, or newly unsafe
+dynamic probes. Resolved findings are recorded as progress. The full decision
+logic is in [WORKFLOW.md](WORKFLOW.md#baseline-diff-mode).
 
 ## Test a live LLM endpoint
 
@@ -175,10 +191,13 @@ acceptance procedure is in [POC.md](POC.md).
 | Evidence | Recorded result |
 | --- | --- |
 | Installable CLI | Editable package install succeeded; `argus` and `argus-runtime` help commands work |
-| Automated quality gate | 58 tests passed; Black, Flake8, mypy, and schema checks passed |
+| Automated quality gate | 61 tests passed; Black, Flake8, mypy, and schema checks passed |
 | SARIF export | GitHub-compatible `report.sarif` with stable rule IDs, locations, severity, and fingerprints |
 | Current deployment smoke | Claude global settings `BLOCK` on 1 CRITICAL credential finding; Claude local/Codex/Gemini configs `PASS`; empty Gemini MCP registry `ERROR` |
 | Real MCP server | Official pinned filesystem server: 14 tools, 1 page, 0 tool calls, 2 HIGH findings, `BLOCK` |
+| Baseline gate | Existing findings remain visible while new or escalated risk returns exit code `10` |
+| Evidence bundle | [Sanitized recorded MCP result](evidence/real-mcp/README.md) with provenance and hashes |
+| Compatibility and supply chain | Cross-platform CI matrix, dependency audit/SBOM, and Docker image advisory scan |
 | Performance smoke run | Static: 4 files in 0.016s; real MCP discovery: 14 tools in 1.834s warm or 70.655s latest cold with `npx` startup |
 | Runtime POC | The repository CI/Compose workflow is configured to verify health, `403` prompt blocking, forwarding, metrics, and sanitized audit events |
 
@@ -263,3 +282,7 @@ PYTHONPATH=. .venv/bin/python -m src.models.schema_generation --check
 ```
 
 The project requires Python 3.11+; Docker is the most portable runtime path.
+
+Repository policy and maintenance details: [LICENSE](LICENSE),
+[SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md), and
+[CHANGELOG.md](CHANGELOG.md).

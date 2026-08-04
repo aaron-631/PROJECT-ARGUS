@@ -30,6 +30,10 @@ python3 -m venv .venv
 mkdir -p reports/poc poc-mcp-root
 ```
 
+For the shortest safe rehearsal, run `python scripts/demo.py` instead. It
+covers the example fixture, baseline gate, and deterministic mock; use the
+steps below when you want to show each boundary separately.
+
 ## 1. Static configuration scan
 
 This step is safe: it reads files and starts no agent, model, or MCP server.
@@ -185,6 +189,9 @@ runtime-audit/events.jsonl
 Also record the OS, Python version, Node/npm version, package versions, command
 lines, timestamps, and whether the endpoint was mock or real. A strong claim is
 always tied to its evidence and its boundary.
+
+A sanitized recorded MCP result is checked in at
+[`evidence/real-mcp/`](evidence/real-mcp/).
 
 ## POC conclusion
 

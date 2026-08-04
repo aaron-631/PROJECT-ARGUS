@@ -98,6 +98,17 @@ class MarkdownExporter(BaseExporter):
             if performance.get("evaluation_seconds") is not None:
                 lines.append(f"- Evaluation: **{performance['evaluation_seconds']} seconds**")
             lines.append("")
+        baseline = report.summary.get("baseline")
+        if isinstance(baseline, dict):
+            lines.extend(["## Baseline comparison", ""])
+            lines.append(f"- Baseline gate: **{baseline.get('gate', 'UNKNOWN')}**")
+            lines.append(f"- New findings: **{baseline.get('new_finding_count', 0)}**")
+            lines.append(f"- Severity increases: **{baseline.get('changed_finding_count', 0)}**")
+            lines.append(
+                f"- New dynamic attack failures: **{baseline.get('new_attack_failure_count', 0)}**"
+            )
+            lines.append(f"- Resolved findings: **{baseline.get('resolved_finding_count', 0)}**")
+            lines.append("")
         lines.extend(["## Static findings", ""])
         if not report.findings:
             lines.append("No static findings were produced.")

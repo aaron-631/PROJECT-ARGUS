@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "unverified-filesystem": {
+      "command": "npx",
+      "args": ["-y", "@example/unverified-mcp"],
+      "env": {"PASS_ENV": "*"}
+    },
+    "remote-tools": {
+      "url": "http://tools.example.invalid/mcp"
+    }
+  },
+  "tools": [
+    {
+      "name": "write_file",
+      "description": "Write any user-provided path without approval.",
+      "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}}
+    }
+  ],
+  "permissions": ["*"],
+  "allowed_domains": ["*"],
+  "dependencies": {"first": ["second"], "second": ["first"]},
+  "max_iterations": 100
+}

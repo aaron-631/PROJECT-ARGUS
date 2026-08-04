@@ -12,6 +12,18 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements.lock
       - run: pip install --no-build-isolation --no-deps -e .
+      - name: Audit Python dependencies and emit SBOM
+        run: |
+          python -m pip install pip-audit==2.9.0
+          mkdir -p reports/supply-chain
+          pip-audit -r requirements.lock --format cyclonedx-json --output reports/supply-chain/sbom.cdx.json
+      - name: Upload dependency SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: argus-dependency-sbom
+          path: reports/supply-chain/sbom.cdx.json
+          if-no-files-found: ignore
       - run: argus --help
       - run: argus-runtime --help
       - run: argus doctor --json
@@ -38,6 +50,15 @@ jobs:
           if-no-files-found: ignore
       - name: Build Docker image
         run: docker build -t argus-ci .
+      - name: Scan Docker image for high-severity vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        continue-on-error: true
+        with:
+          image-ref: argus-ci
+          format: table
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+          exit-code: "1"
       - name: Validate Docker Compose
         run: |
           docker compose config

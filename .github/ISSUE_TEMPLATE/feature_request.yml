@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest a practical improvement
+title: "feature: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: Who needs this, what are they trying to protect, and what happens without it?
+    validations:
+      required: true
+  - type: textarea
+    id: tradeoff
+    attributes:
+      label: Security trade-off
+      description: Describe false positives, false negatives, performance, and trust-boundary impact.
+    validations:
+      required: true
