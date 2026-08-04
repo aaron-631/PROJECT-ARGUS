@@ -34,6 +34,15 @@ The decision is simple: `PASS` means no defined rule crossed the configured
 threshold, `BLOCK` means findings need review, and `ERROR` means the test could
 not complete. A PASS is not a universal security guarantee.
 
+Choose the command by what is live:
+
+| Goal | Command | What it does |
+| --- | --- | --- |
+| Review files/config/skills | `argus.py audit --target PATH` | Safe static scan; launches nothing |
+| Test a live LLM HTTP endpoint | `argus.py audit --target PATH --endpoint URL ...` | Sends bounded, authorized behavior probes |
+| Inspect a live MCP server | `argus.py mcp-probe --transport ... --confirm-live` | Reads `initialize` and `tools/list`; calls zero tools |
+| Protect deployed model traffic | `docker-compose.runtime.yml` | Runs the V2 gateway in front of a JSON HTTP upstream |
+
 ## Run it against a real agent repository
 
 ```bash
@@ -215,6 +224,12 @@ still provides the deployed traffic control layer.
 `--confirm-live` is an authorization check, not a sandbox. A stdio server runs
 with the current operating-system user's permissions; only launch a reviewed
 command, or place it in a container/OS sandbox when the package is not trusted.
+
+For a dynamic MCP setup, run the static audit first and then probe each
+authorized server whose live tool list matters. Argus does not infer commands,
+inherit secrets, or launch every server found in a config file. If a server can
+change its tools while running, repeat the probe at release time and use the
+host agent/runtime gateway for ongoing policy enforcement.
 
 ## Audit an OpenClaw installation
 

@@ -177,5 +177,7 @@ def test_streamable_http_probe_tracks_session_and_pagination(monkeypatch) -> Non
     assert [tool["name"] for tool in result.tools] == ["search"]
     assert result.session_id_present is True
     assert requests[1]["headers"]["Mcp-Session-Id"] == "session-1"
+    assert requests[1]["headers"]["MCP-Protocol-Version"] == "2025-06-18"
+    assert requests[2]["headers"]["MCP-Protocol-Version"] == "2025-06-18"
     assert all(request["body"]["method"] != "tools/call" for request in requests)
     assert result.target == "https://mcp.example.test/mcp"

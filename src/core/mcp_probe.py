@@ -405,6 +405,7 @@ class _HTTPStreamableSession:
         }
         self.limits = limits
         self.session_id: str | None = None
+        self.protocol_version: str | None = None
         self.session: aiohttp.ClientSession | None = None
         self._request_id = 0
 
@@ -421,6 +422,8 @@ class _HTTPStreamableSession:
         headers = dict(self.headers)
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
+        if self.protocol_version:
+            headers["MCP-Protocol-Version"] = self.protocol_version
         body = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params or {}}
         try:
             async with self.session.post(self.endpoint, json=body, headers=headers) as response:
@@ -452,7 +455,11 @@ class _HTTPStreamableSession:
             raise MCPProbeError("MCP HTTP response was not a JSON-RPC object")
         if "error" in message:
             raise MCPProbeError(f"MCP {method} request returned an error")
-        return message.get("result")
+        result = message.get("result")
+        if method == "initialize" and isinstance(result, dict):
+            negotiated = result.get("protocolVersion")
+            self.protocol_version = negotiated if isinstance(negotiated, str) else None
+        return result
 
     async def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
         if self.session is None:
@@ -460,6 +467,8 @@ class _HTTPStreamableSession:
         headers = dict(self.headers)
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
+        if self.protocol_version:
+            headers["MCP-Protocol-Version"] = self.protocol_version
         body = {"jsonrpc": "2.0", "method": method, "params": params or {}}
         try:
             async with self.session.post(self.endpoint, json=body, headers=headers) as response:
@@ -476,6 +485,8 @@ class _HTTPStreamableSession:
         if self.session_id:
             headers = dict(self.headers)
             headers["Mcp-Session-Id"] = self.session_id
+            if self.protocol_version:
+                headers["MCP-Protocol-Version"] = self.protocol_version
             try:
                 async with self.session.delete(self.endpoint, headers=headers):
                     pass

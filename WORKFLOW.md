@@ -25,6 +25,18 @@ Your basic interview loop should be:
 problem → design → code path → security decision → tradeoff → test evidence → limitation
 ```
 
+The practical command decision is:
+
+```text
+files/config/skills?       → audit --target PATH
+live LLM HTTP endpoint?    → audit --target PATH --endpoint URL
+live MCP tool inventory?   → mcp-probe --transport ... --confirm-live
+deployed traffic control?  → runtime_gateway.py / docker-compose.runtime.yml
+```
+
+This keeps the fast path obvious: static review is the default, live network
+and process execution are explicit, and runtime blocking is a separate service.
+
 ## 1. The project in one sentence
 
 Argus has two deliberately separate layers for LLM applications and autonomous agents: V1 is a local-first pre-deployment evaluator, and V2 is an optional runtime gateway for live request/response enforcement. V1 checks configuration and optionally probes an authorized endpoint with versioned prompt-injection, jailbreak, and data-extraction tests. V2 applies deterministic placement-agent policies before and after an upstream model call.
@@ -448,6 +460,19 @@ fed into the same deterministic MCP rules used for repository scans. This
 means a live server can produce findings for weak schemas, dangerous tool
 names, missing approval metadata, and other configured controls.
 
+The transport behavior follows the [MCP transport specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+and [MCP tools specification](https://modelcontextprotocol.io/specification/2025-06-18/server/tools):
+stdio is newline-delimited JSON-RPC, while Streamable HTTP uses POST with JSON
+or SSE responses and paginated `tools/list` results. The probe sends the
+negotiated protocol-version header on subsequent HTTP requests.
+
+In a dynamic MCP deployment, “dynamic” means the server's current advertised
+tool surface is read at probe time. It does not mean Argus becomes a permanent
+MCP client or executes actions. Probe each approved server after configuration
+changes; use the host agent or V2 gateway to enforce tool calls during live
+operation. This separation is safer, faster to reason about, and produces a
+clear audit artifact.
+
 For a local stdio server:
 
 ```bash
@@ -480,12 +505,13 @@ stdio example uses 120 seconds because `npx` may download a package on its
 first run; preinstall the pinned package or keep the longer timeout for a cold
 start.
 
-The implementation follows MCP JSON-RPC pagination and tracks a returned
-`Mcp-Session-Id`. It accepts either JSON or SSE responses from a Streamable
-HTTP POST, bounds response and tool metadata size, and closes the session when
-possible. It does not disable TLS verification or put header values in the
-report. A stdio child receives only a small launcher/runtime environment by
-default; use repeatable `--env CHILD_NAME=LOCAL_ENV_VAR` for an explicitly
+The implementation follows MCP JSON-RPC pagination, tracks a returned
+`Mcp-Session-Id`, and sends the negotiated `MCP-Protocol-Version` on
+subsequent HTTP requests. It accepts either JSON or SSE responses from a
+Streamable HTTP POST, bounds response and tool metadata size, and closes the
+session when possible. It does not disable TLS verification or put header
+values in the report. A stdio child receives only a small launcher/runtime
+environment by default; use repeatable `--env CHILD_NAME=LOCAL_ENV_VAR` for an explicitly
 reviewed value. On POSIX, the child is placed in its own process group so
 cleanup can terminate its descendants; this is lifecycle cleanup, not a
 security sandbox. `--confirm-live` means the operator authorized execution;
@@ -646,6 +672,23 @@ filesystem server was reachable and its tool inventory was real, while Argus
 identified two controls the host should add before exposing those tools to an
 agent. The report also lists all 14 names so an operator can compare the live
 surface with the reviewed configuration.
+
+### What this evidence proves—and what it does not
+
+For placement discussions, use this exact boundary:
+
+| Proven by the repository and recorded run | Not proven by the recorded run |
+| --- | --- |
+| Static audits can inspect real Claude Code, Codex CLI, and Gemini CLI configuration files selected by the operator. | Argus does not attach to a running CLI, inspect chat history, or read private credential/session databases. |
+| A real pinned stdio MCP server can be launched, initialized, paginated with `tools/list`, analyzed, and closed without a tool call. | The real run did not invoke a live OpenAI, Anthropic, Gemini, or Ollama model. |
+| The Streamable HTTP implementation has unit coverage for JSON, SSE, sessions, pagination, and negotiated protocol headers; the code enforces response/tool limits. | A live authenticated Streamable HTTP server was not part of this recorded run; validate one in the target environment before production. |
+| The repository defines CI, Docker, Compose, report-contract, and runtime-gateway smoke workflows; the local Python checks pass on this branch. | “Any device” is not a tested guarantee: Windows, macOS, ARM hosts, enterprise proxies, and every MCP server implementation still require a local smoke test. |
+
+This makes the project placement-ready as a demonstrable engineering project and
+useful security tool, not a universal certification platform. The honest answer
+in an interview is: “It works end to end for the supported local and HTTP
+contracts, and I can show the real MCP report; I would run the short environment
+smoke test before approving a new provider, transport, or operating system.”
 
 No live OpenAI, Anthropic, Gemini API, or Ollama model probe was claimed in this
 run: no API key was available and no Ollama service was running. To produce
