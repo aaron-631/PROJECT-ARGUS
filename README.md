@@ -179,7 +179,7 @@ acceptance procedure is in [POC.md](POC.md).
 | SARIF export | GitHub-compatible `report.sarif` with stable rule IDs, locations, severity, and fingerprints |
 | Current deployment smoke | Claude global settings `BLOCK` on 1 CRITICAL credential finding; Claude local/Codex/Gemini configs `PASS`; empty Gemini MCP registry `ERROR` |
 | Real MCP server | Official pinned filesystem server: 14 tools, 1 page, 0 tool calls, 2 HIGH findings, `BLOCK` |
-| Performance smoke run | Static: 4 files in 0.016s; real MCP discovery: 14 tools in 1.834s warm or 70.794s cold with `npx` startup |
+| Performance smoke run | Static: 4 files in 0.016s; real MCP discovery: 14 tools in 1.834s warm or 70.655s latest cold with `npx` startup |
 | Runtime POC | The repository CI/Compose workflow is configured to verify health, `403` prompt blocking, forwarding, metrics, and sanitized audit events |
 
 The real MCP evidence is documented in [WORKFLOW.md](WORKFLOW.md#661-real-world-verification-run).
@@ -200,20 +200,22 @@ For GitHub Code Scanning, upload the generated SARIF artifact from CI:
 <summary>Captured real Argus run — 2026-08-04</summary>
 
 Environment: Linux workspace, Python 3.14.4, Node.js v24.15.0, npm 11.16.0,
-merged `main`, commit `38ca0a7`.
+merged `main`, commit `7b9a22f`.
 
 ```text
 $ .venv/bin/argus mcp-probe \
     --transport stdio --command npx --arg=-y \
     --arg=@modelcontextprotocol/server-filesystem@2026.7.10 \
     --arg=/tmp/argus-real-mcp-root --server-name official-filesystem \
-    --timeout 120 --confirm-live --output /tmp/argus-main-real-mcp
+    --timeout 120 --confirm-live --output /tmp/argus-current-main-real-mcp
 
 [Argus] Decision: BLOCK
 [Argus] MCP transport: stdio; tools discovered: 14
 [Argus] Tool calls: 0 (read-only discovery)
-[Argus] Report written: /tmp/argus-main-real-mcp/report.json
-[Argus] Report written: /tmp/argus-main-real-mcp/report.md
+[Argus] Performance: 70.655s
+[Argus] Report written: /tmp/argus-current-main-real-mcp/report.json
+[Argus] Report written: /tmp/argus-current-main-real-mcp/report.md
+[Argus] Report written: /tmp/argus-current-main-real-mcp/report.sarif
 shell_status:10
 ```
 

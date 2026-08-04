@@ -658,7 +658,7 @@ were intentionally excluded from the scan targets and evidence:
 | Gemini CLI 0.49.0 | `$HOME/.gemini/config/config.json` | PASS; 0 findings |
 | Gemini MCP registry | `$HOME/.gemini/config/mcp_config.json` | ERROR; file is empty, so Argus correctly refused to call it safe |
 | OpenClaw | `$HOME/.openclaw` | Not installed in this environment; no result claimed |
-| Official MCP server 2026.7.10 | Installed `argus mcp-probe` launched `@modelcontextprotocol/server-filesystem` over stdio with one temporary directory as its only allowed root | 14 tools, 1 page, 0 tool calls; 1.834s warm / 70.794s cold `npx`; Argus returned BLOCK for 2 HIGH findings |
+| Official MCP server 2026.7.10 | Installed `argus mcp-probe` launched `@modelcontextprotocol/server-filesystem` over stdio with one temporary directory as its only allowed root | 14 tools, 1 page, 0 tool calls; 1.834s warm / 70.655s latest cold `npx`; Argus returned BLOCK for 2 HIGH findings |
 
 The reproducible static commands were:
 
@@ -670,9 +670,11 @@ The reproducible static commands were:
 .venv/bin/argus audit --target "$HOME/.gemini/config/mcp_config.json" --output ./reports/real-gemini-mcp
 ```
 
-The current local reports were written to `/tmp/argus-installed-*` during the
-verification run. Retain the generated `report.json`, `report.md`, and
-`report.sarif` artifacts when repeating this on another machine. The empty
+The CLI configuration reports were written to `/tmp/argus-installed-*` during
+the verification run, and the refreshed current-`main` MCP report is in
+`/tmp/argus-current-main-real-mcp`. Retain the generated `report.json`,
+`report.md`, and `report.sarif` artifacts when repeating this on another
+machine. The empty
 Gemini MCP file demonstrates an important gate: malformed or incomplete
 configuration is `ERROR` with a non-zero exit code, never a false `PASS`.
 
@@ -752,7 +754,7 @@ that evidence on another machine, use the provider commands in Section 6.4
 with an endpoint and credentials that the operator is authorized to test.
 
 For first-time users, the safest order is: scan one local config, inspect the
-two report files, run the deterministic endpoint to learn dynamic results,
+three report files, run the deterministic endpoint to learn dynamic results,
 then run a real provider or MCP test only after authorization. `PASS` means
 no defined rule crossed the configured gate; it does not mean “secure in every
 possible way.” `BLOCK` means review and remediation are required; `ERROR`
