@@ -176,6 +176,46 @@ The reports to retain as proof are `report.md`, `report.json`, and
 `runtime-audit/events.jsonl`. Record the OS, Python/Node versions, package
 versions, command, timestamp, and whether each endpoint was mock or real.
 
+<details>
+<summary>Captured real Argus run — 2026-08-04</summary>
+
+Environment: Linux workspace, Python 3.14.4, Node.js v24.15.0, npm 11.16.0,
+branch `feature/argus-runtime-gateway`, commit `982f85e`.
+
+```text
+$ .venv/bin/python argus.py mcp-probe \
+    --transport stdio --command npx --arg=-y \
+    --arg=@modelcontextprotocol/server-filesystem@2026.7.10 \
+    --arg=/tmp/argus-real-mcp-root --server-name official-filesystem \
+    --timeout 120 --confirm-live --output /tmp/argus-proof-mcp
+
+[Argus] Decision: BLOCK
+[Argus] MCP transport: stdio; tools discovered: 14
+[Argus] Tool calls: 0 (read-only discovery)
+[Argus] Report written: /tmp/argus-proof-mcp/report.json
+[Argus] Report written: /tmp/argus-proof-mcp/report.md
+shell_status:10
+```
+
+`10` is Argus's expected “findings crossed the gate” exit code—not a crash.
+The generated report contained:
+
+```text
+Decision: BLOCK (fail on HIGH)
+Findings: 2
+HIGH ARGUS_ST_002 — Missing input sanitization schema
+HIGH ARGUS_ST_017 — High-impact MCP tool without approval
+MCP live probe — 14 tools, 1 page, 0 tool calls
+Server — secure-filesystem-server 0.2.0
+```
+
+The finding evidence is actionable: add stronger input constraints to
+`read_file` and require approval before exposing `write_file`. This is a live
+MCP inventory and deterministic report; it is not a claim that every tool
+implementation is safe.
+
+</details>
+
 This evidence does not claim a live commercial LLM test, live authenticated
 Streamable HTTP test, every operating system, or every MCP transport. Those
 must be run in the target environment before production approval.
