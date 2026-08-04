@@ -248,7 +248,7 @@ Useful options:
 
 ```text
 --profile NAME       Merge config/profiles/NAME.yaml
---output DIRECTORY   Write report.json and report.md here
+--output DIRECTORY   Write report.json, report.md, and report.sarif here
 --endpoint URL       Explicitly enable dynamic testing
 --provider NAME      generic, openai, anthropic, or ollama
 --model NAME         Model identifier for the live provider adapter
@@ -1407,7 +1407,7 @@ The same issue can have different operational impact in a public FAQ and an auto
 
 ### Why is the vault separate?
 
-`src/utils/crypto.py` provides AES-256-GCM encryption, authenticated envelopes, key IDs, atomic writes, safe filenames, and key rotation. It is a reusable utility for sensitive artifacts. The normal scan output is still a sanitized JSON/Markdown report; `vault.enabled` does not automatically encrypt every report or raw response.
+`src/utils/crypto.py` provides AES-256-GCM encryption, authenticated envelopes, key IDs, atomic writes, safe filenames, and key rotation. It is a reusable utility for sensitive artifacts. The normal scan output is still a sanitized JSON/Markdown/SARIF report; `vault.enabled` does not automatically encrypt every report or raw response.
 
 Generate a key:
 
@@ -1725,7 +1725,7 @@ A strong portfolio project is not one that claims to solve everything. It is one
 | Live MCP discovery | Read-only stdio and Streamable HTTP `initialize`/paginated `tools/list`; never `tools/call` | `src/core/mcp_probe.py`, `tests/unit/test_mcp_probe.py` |
 | Dynamic probing | Three attack families with three versioned payloads each | `src/modules/attacks/`, dataset tests |
 | Resilience | Concurrency bound, rate limiter, timeout, retry, backoff, and `Retry-After` parsing | `src/core/engine.py`, `src/core/rate_limiter.py`, resilience tests |
-| Output contracts | Pydantic models, strict fields, generated JSON Schemas, JSON and Markdown exporters | `src/models/`, `src/reporting/` |
+| Output contracts | Pydantic models, strict fields, generated JSON Schemas, JSON/Markdown/SARIF exporters | `src/models/`, `src/reporting/` |
 | Output privacy | Secret redaction, invisible-character cleanup, escaped judge delimiters, empty raw response field | `src/core/sanitization.py`, security tests |
 | Semantic judging | Null, mock, and optional provider-neutral HTTP judge | `src/interfaces/judge.py`, judge tests |
 | Encryption utility | AES-256-GCM envelope, atomic file writes, key IDs, previous-key rotation | `src/utils/crypto.py`, crypto tests |
@@ -1863,7 +1863,7 @@ This is dependency injection: the engine does not need to know whether it is tal
 
 ### 18.4 Understand the current plugin boundary
 
-The registry has contracts for scanners, attacks, judges, and exporters. Built-in scanners and attacks participate directly in the engine configuration. The CLI currently selects the built-in JSON and Markdown exporters directly, and `_judge()` selects the built-in judge names directly. Therefore, a custom judge or exporter needs a small wiring change in `src/core/engine.py` or `argus.py`; registering a class alone does not make it selectable from YAML.
+The registry has contracts for scanners, attacks, judges, and exporters. Built-in scanners and attacks participate directly in the engine configuration. The CLI currently selects the built-in JSON, Markdown, and SARIF exporters directly, and `_judge()` selects the built-in judge names directly. Therefore, a custom judge or exporter needs a small wiring change in `src/core/engine.py` or `argus.py`; registering a class alone does not make it selectable from YAML.
 
 This is worth explaining in an interview because it shows that the architecture has extension points without pretending it already has a complete third-party plugin marketplace.
 
@@ -1924,7 +1924,7 @@ Before an interview, you should be able to do all of these without opening anoth
 
 - explain Argus in 30 seconds;
 - draw the CLI → config → ingress → scanner/attacks → evaluator → report flow;
-- run a static scan and find the two output files;
+- run a static scan and find the three output files;
 - start the mock and run a live scan in two terminals;
 - explain why the demo uses `--fail-on CRITICAL`;
 - run `mcp-probe` against an authorized stdio or Streamable HTTP server and explain why it makes zero tool calls;
