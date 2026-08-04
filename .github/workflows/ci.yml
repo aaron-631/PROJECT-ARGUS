@@ -29,3 +29,7 @@ jobs:
         run: docker build -t argus-ci .
       - name: Validate Docker Compose
         run: docker compose config
+      - name: Run Docker Compose smoke test
+        run: |
+          trap 'docker compose down' EXIT
+          docker compose up --build --abort-on-container-exit --exit-code-from argus
