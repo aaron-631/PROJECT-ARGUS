@@ -65,4 +65,6 @@ app.router.add_post("/v1/chat/completions", handle_completion)
 
 
 if __name__ == "__main__":
-    web.run_app(app, host="127.0.0.1", port=8765)
+    # Bind all interfaces so the Compose Argus service can reach the mock
+    # across the container network. Local callers can still use 127.0.0.1.
+    web.run_app(app, host="0.0.0.0", port=8765)

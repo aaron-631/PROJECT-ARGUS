@@ -1,15 +1,24 @@
 services:
   mock:
     build: .
-    command: ["python", "tests/mock_server.py"]
+    entrypoint: ["python", "tests/mock_server.py"]
     expose:
       - "8765"
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 8765), 2); s.close()"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 1s
 
   argus:
     build: .
-    command: ["scan", "--target", "/app/config", "--output", "/app/reports"]
+    command:
+      ["scan", "--target", "/app/config", "--output", "/app/reports", "--fail-on", "CRITICAL"]
     depends_on:
-      - mock
+      mock:
+        condition: service_healthy
     volumes:
       - ./config:/app/config:ro
       - ./reports:/app/reports
