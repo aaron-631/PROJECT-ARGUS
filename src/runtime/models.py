@@ -73,18 +73,31 @@ class RuntimeConfig(ArgusModel):
             "openai-project",
         ]
     )
+    require_client_auth: bool = False
+    client_auth_header: str = "X-Argus-Client-Token"
+    client_auth_token_env: str = "ARGUS_RUNTIME_CLIENT_TOKEN"
+    protect_metrics: bool = True
+    approval_service_url: str | None = None
+    approval_service_token_env: str = "ARGUS_RUNTIME_APPROVAL_SERVICE_TOKEN"
+    approval_service_timeout_seconds: float = Field(default=5.0, gt=0.0, le=60.0)
+    audit_sink_url: str | None = None
+    audit_sink_token_env: str = "ARGUS_RUNTIME_AUDIT_SINK_TOKEN"
+    audit_sink_timeout_seconds: float = Field(default=5.0, gt=0.0, le=60.0)
+    audit_sink_max_retries: int = Field(default=3, ge=0, le=10)
     approval_header: str = "X-Argus-Approval-Token"
     approval_token_env: str = "ARGUS_RUNTIME_APPROVAL_TOKEN"
     audit_path: str = "./runtime-audit/events.jsonl"
     audit_hmac_key_env: str = "ARGUS_RUNTIME_AUDIT_KEY"
     policy: RuntimePolicyConfig = Field(default_factory=RuntimePolicyConfig)
 
-    @field_validator("upstream_url")
+    @field_validator("upstream_url", "approval_service_url", "audit_sink_url")
     @classmethod
-    def http_upstream_only(cls, value: str) -> str:
+    def http_urls_only(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("upstream_url must be an absolute http or https URL")
+            raise ValueError("configured URLs must be absolute http or https URLs")
         return value
 
 

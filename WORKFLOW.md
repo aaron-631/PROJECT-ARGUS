@@ -115,6 +115,8 @@ The main orchestration is in `argus.py` and `src/core/engine.py`.
 | `src/modules/attacks/` | Versioned attack modules and dataset loading |
 | `src/runtime/` | Runtime proxy, policy enforcement, audit writer, and metrics |
 | `runtime_gateway.py` | Runtime gateway entry point for local or Compose execution |
+| `docker-compose.runtime.yml` | Portable runtime-only deployment for a real upstream |
+| `docker-compose.production.yml`, `Caddyfile` | TLS edge and scalable replica deployment baseline |
 | `src/interfaces/` | Extension contracts for scanners, attacks, judges, and exporters |
 | `src/core/registry.py` | Deterministic built-in module registration and selection |
 | `src/models/domain.py` | Pydantic source-of-truth domain models |
@@ -512,7 +514,13 @@ The supported deployment variables are:
 | `ARGUS_RUNTIME_UPSTREAM_URL` | Absolute `http://` or `https://` model endpoint reachable from the gateway | `https://model.internal/v1/messages` |
 | `ARGUS_RUNTIME_PORT` | Host port mapped to gateway port `8080` | `18080` |
 | `ARGUS_RUNTIME_APPROVAL_TOKEN` | Short-lived approval secret for the demo gate | Inject from a secret manager |
+| `ARGUS_RUNTIME_REQUIRE_CLIENT_AUTH` | Require the client token on model traffic | `true` in production profile |
+| `ARGUS_RUNTIME_CLIENT_TOKEN` | Gateway client credential | Inject from a secret manager |
+| `ARGUS_RUNTIME_APPROVAL_SERVICE_URL` | External approval decision endpoint | `https://approvals.internal/v1/decisions` |
+| `ARGUS_RUNTIME_APPROVAL_SERVICE_TOKEN` | Gateway credential for the approval service | Inject from a secret manager |
 | `ARGUS_RUNTIME_AUDIT_KEY` | Optional HMAC key for audit authenticity | Inject from a secret manager |
+| `ARGUS_RUNTIME_AUDIT_SINK_URL` | Durable remote audit collector | `https://audit.internal/v1/events` |
+| `ARGUS_RUNTIME_AUDIT_SINK_TOKEN` | Gateway credential for the audit collector | Inject from a secret manager |
 | `ARGUS_RUNTIME_LISTEN_HOST` / `PORT` | Direct-process bind overrides | `0.0.0.0` / `8080` |
 | `ARGUS_RUNTIME_MAX_BODY_BYTES` | Request and response size limit | `1048576` |
 | `ARGUS_RUNTIME_TIMEOUT_SECONDS` | Upstream timeout | `30` |
@@ -521,19 +529,80 @@ The supported deployment variables are:
 
 Inside Docker, `127.0.0.1` means the gateway container, not the host or another container. Use Compose service DNS, `host.docker.internal`, or a reachable machine name. The generic Compose file adds the host-gateway mapping for Docker environments that support it.
 
+### Production topology: TLS, identity, approvals, audit, and replicas
+
+`docker-compose.production.yml` adds the deployable edge topology:
+
+```text
+client
+  │ HTTPS + X-Argus-Client-Token
+  ▼
+Caddy :443  ──TLS termination + load balancing──>  runtime replica 1 ─┐
+                                                    runtime replica 2 ─┼─> model upstream
+                                                    runtime replica N ─┘
+                                                              │
+                                                              ├─> approval service
+                                                              └─> audit collector
+```
+
+Prepare DNS so `ARGUS_DOMAIN` points to the host, copy the production environment template, fill every secret, and start two replicas:
+
+```bash
+cp .env.production.example .env.production
+# Set the real domain, upstream, client token, approval service, and audit collector.
+docker compose --env-file .env.production \
+  -f docker-compose.production.yml up --build --scale runtime=2
+```
+
+Caddy obtains and renews public certificates when ports 80 and 443 are reachable and DNS is correct. The gateway containers have no public host port; only Caddy is exposed. For local TLS testing with `ARGUS_DOMAIN=localhost`, use `curl -k` because the local certificate is not publicly trusted.
+
+The gateway authentication baseline is a shared client token checked with constant-time comparison. It is appropriate for a controlled internal deployment, but an enterprise identity layer should put OIDC, mTLS, or a service-mesh policy in front of Caddy and rotate the token through a secret manager.
+
+The runtime is stateless apart from its per-replica local audit file. Each replica uses `$HOSTNAME` in its audit filename, so replicas do not concurrently append to one hash chain. Configure `ARGUS_RUNTIME_AUDIT_SINK_URL` to ship each sanitized event to a durable collector; the remote sink must return a 2xx response and deduplicate by `event_hash`. Remote delivery is retried and failures appear in `argus_runtime_audit_ship_failures_total`; local audit files remain the recovery source.
+
+### Approval-service contract
+
+When a high-impact tool needs approval, the gateway sends sanitized metadata—not prompts or raw secrets—to `ARGUS_RUNTIME_APPROVAL_SERVICE_URL`:
+
+```json
+{
+  "request_id": "request-123",
+  "reason_codes": ["HUMAN_APPROVAL_REQUIRED"],
+  "tools": [
+    {
+      "name": "update_student_record",
+      "arguments": {"email": "[REDACTED_EMAIL]"},
+      "arguments_sha256": "..."
+    }
+  ]
+}
+```
+
+The service authenticates the gateway's Bearer token and returns:
+
+```json
+{"approved": true, "decision_id": "approval-456"}
+```
+
+Any non-2xx response, timeout, malformed response, or `approved: false` remains a `428` review decision. The approval service should persist the decision, approver identity, reason, expiry, and audit correlation ID; Argus deliberately does not pretend to be the human approval UI or identity database.
+
+### Audit-collector contract
+
+The audit collector receives one sanitized JSON event per `POST` and should return `2xx` only after durable acceptance. It can authenticate with `ARGUS_RUNTIME_AUDIT_SINK_TOKEN`. Events contain no raw prompts or model responses, but they do contain tool names, decisions, statuses, timing, hashes, and optional approval metadata. Keep the local files until the collector has been verified and retention policy is in place.
+
 ### What “works in production” means here
 
-The gateway is suitable as a deployable policy component when the agent uses JSON over HTTP, the upstream is reachable, and traffic is placed behind it. Before exposing it to real users, add:
+The repository now includes a production baseline. Before exposing it to real users, configure and verify:
 
-1. TLS and client authentication at a reverse proxy or service mesh;
-2. a real approval service or signed short-lived decision instead of a shared token;
-3. secret-manager injection for upstream credentials and the audit HMAC key;
-4. persistent or shipped audit storage, log rotation, and Prometheus alerting;
-5. a deployment health/readiness policy and at least one provider-specific integration test;
+1. public DNS and certificate issuance through Caddy, or replace Caddy with your organization’s ingress;
+2. OIDC/mTLS/service-mesh identity if a shared token is insufficient;
+3. secret-manager injection and rotation for every credential;
+4. durable audit retention, log rotation, and Prometheus alerting;
+5. a provider-specific integration test and upstream health/readiness policy;
 6. `stream: false` unless buffered streaming is explicitly accepted;
-7. a network rule preventing clients from bypassing the gateway.
+7. network controls preventing clients from bypassing the edge.
 
-These are operational boundaries, not hidden assumptions. The repository demo is end-to-end runnable on Docker-capable machines; the reusable Compose file removes the mock dependency for a real upstream, while production identity, TLS, and availability remain deployment responsibilities.
+These are explicit operational boundaries, not hidden assumptions. The repository demo is deterministic; the runtime-only Compose file works with a real upstream; and the production Compose profile supplies a practical TLS, token-auth, approval, audit-shipping, and replica topology.
 
 ## 7. What happens inside a scan
 
@@ -1028,7 +1097,7 @@ Test ownership by file:
 | `test_crypto_and_reporting.py` | Vault behavior and deterministic report exports |
 | `test_risk_engine.py` | Formula boundaries and judge advisory behavior |
 | `runtime/test_policy.py` | Placement prompt, tool, approval, email, secret, and PII policies |
-| `runtime/test_gateway.py` | HTTP forwarding boundary, pre-upstream blocking, audit privacy, and response redaction |
+| `runtime/test_gateway.py` | HTTP forwarding/auth boundary, approval integration, audit shipping, pre-upstream blocking, and response redaction |
 
 The tests inject fake targets instead of requiring a real network service:
 
@@ -1117,7 +1186,7 @@ Pydantic domain models. JSON Schemas are generated artifacts checked into the re
 
 ### “What does Argus not support?”
 
-V2 provides lightweight runtime enforcement, but Argus is not a complete IAM system, container sandbox, multi-tenant hosted service, dashboard, SIEM, or guarantee of safety. The gateway has no built-in production authentication/mTLS, distributed state, high availability, or human approval UI. It also does not understand every framework or prove that a model is secure against every possible prompt.
+V2 provides runtime enforcement, shared-token client authentication, approval-service and audit-sink integrations, and a Caddy/Compose deployment baseline. Argus is still not a complete IAM system, container sandbox, multi-tenant hosted service, dashboard, SIEM, or guarantee of safety. It does not provide OIDC/mTLS identity, multi-region failover, or the human approval UI/database itself. It also does not understand every framework or prove that a model is secure against every possible prompt.
 
 ## 14. Troubleshooting
 
@@ -1173,7 +1242,8 @@ Current limits:
 - endpoint authentication headers are not exposed as CLI options;
 - the normal report intentionally omits raw model responses;
 - the V2 gateway can enforce the defined policies on traffic routed through it, but it does not automatically observe traffic that bypasses the gateway;
-- the gateway has no built-in production authentication/mTLS, distributed deployment, dashboard/SIEM integration, or high-availability coordination;
+- the gateway includes shared-token authentication and a Compose/Caddy replica topology, but not OIDC/mTLS, distributed coordination, dashboard/SIEM product integration, or multi-region failover;
+- remote audit shipping is retrying best-effort; local per-replica files remain necessary until the collector confirms durable acceptance;
 - provider-specific request translation is not included; the upstream must already accept the client's JSON shape and the gateway only understands common tool-call shapes;
 - token-by-token streaming is not supported; responses are buffered for inspection;
 - the default semantic judge is disabled.
@@ -1393,7 +1463,8 @@ CLI
 9. Dependency injection makes resilience tests fast and deterministic.
 10. The runtime gateway fails closed for defined request, response, size, timeout, and upstream-error policies.
 11. Sanitized hash-chained audit events and Prometheus metrics make runtime decisions observable.
-12. CI and Docker turn the design into a repeatable delivery process.
+12. Client authentication, external approval, remote audit shipping, and Caddy TLS/replica deployment cover the production boundary.
+13. CI and Docker turn the design into a repeatable delivery process.
 
 ### Closing sentence
 

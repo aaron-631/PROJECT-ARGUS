@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import hmac
 import json
 import re
@@ -154,6 +155,27 @@ def _redact_value(value: Any, redact_personal_data: bool) -> tuple[Any, int]:
     return value, 0
 
 
+def approval_context(body: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return reviewable tool metadata without prompts or unsanitized secrets."""
+
+    context: list[dict[str, Any]] = []
+    for call in _tool_calls(body):
+        name = _tool_name(call)
+        if not name:
+            continue
+        arguments = _tool_arguments(call)
+        safe_arguments, _ = _redact_value(arguments, redact_personal_data=True)
+        canonical = json.dumps(safe_arguments, sort_keys=True, separators=(",", ":"))
+        context.append(
+            {
+                "name": name,
+                "arguments": safe_arguments,
+                "arguments_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+            }
+        )
+    return context
+
+
 class RuntimePolicy:
     """Apply placement-agent policies without an LLM or external state."""
 
@@ -165,7 +187,11 @@ class RuntimePolicy:
         self._output_patterns = [re.compile(pattern) for pattern in config.block_output_patterns]
 
     def inspect_request(
-        self, body: Any, approval_token: str | None, configured_token: str | None
+        self,
+        body: Any,
+        approval_token: str | None,
+        configured_token: str | None,
+        approval_granted: bool = False,
     ) -> PolicyDecision:
         if not isinstance(body, dict):
             return PolicyDecision(decision="block", reason_codes=["INVALID_REQUEST_OBJECT"])
@@ -174,10 +200,14 @@ class RuntimePolicy:
         if any(pattern.search(prompt_text) for pattern in self._prompt_patterns):
             return PolicyDecision(decision="block", reason_codes=["PROMPT_INJECTION_BLOCKED"])
 
-        return self._inspect_tools(body, approval_token, configured_token)
+        return self._inspect_tools(body, approval_token, configured_token, approval_granted)
 
     def _inspect_tools(
-        self, body: dict[str, Any], approval_token: str | None, configured_token: str | None
+        self,
+        body: dict[str, Any],
+        approval_token: str | None,
+        configured_token: str | None,
+        approval_granted: bool = False,
     ) -> PolicyDecision:
         calls = _tool_calls(body)
         names = sorted({name for call in calls if (name := _tool_name(call))})
@@ -201,7 +231,7 @@ class RuntimePolicy:
             )
         ]
         if approval_required:
-            approved = bool(
+            approved = approval_granted or bool(
                 configured_token
                 and approval_token
                 and hmac.compare_digest(approval_token, configured_token)
@@ -235,9 +265,12 @@ class RuntimePolicy:
         body: Any,
         approval_token: str | None = None,
         configured_token: str | None = None,
+        approval_granted: bool = False,
     ) -> tuple[PolicyDecision, Any]:
         if isinstance(body, dict):
-            tool_decision = self._inspect_tools(body, approval_token, configured_token)
+            tool_decision = self._inspect_tools(
+                body, approval_token, configured_token, approval_granted
+            )
             if tool_decision.decision != "allow":
                 return tool_decision, None
         raw_text = " ".join(_strings(body))
@@ -256,4 +289,4 @@ class RuntimePolicy:
         return PolicyDecision(decision="allow"), body
 
 
-__all__ = ["RuntimePolicy"]
+__all__ = ["RuntimePolicy", "approval_context"]

@@ -31,6 +31,11 @@ jobs:
         run: |
           docker compose config
           docker compose --env-file .env.runtime.example -f docker-compose.runtime.yml config
+          ARGUS_RUNTIME_CLIENT_TOKEN=ci-client-token \
+          ARGUS_RUNTIME_APPROVAL_SERVICE_TOKEN=ci-approval-token \
+          ARGUS_RUNTIME_AUDIT_KEY=ci-audit-key \
+          ARGUS_RUNTIME_AUDIT_SINK_TOKEN=ci-audit-token \
+          docker compose --env-file .env.production.example -f docker-compose.production.yml config
       - name: Run runtime gateway HTTP smoke test
         run: |
           set -e

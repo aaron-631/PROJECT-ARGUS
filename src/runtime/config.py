@@ -43,6 +43,13 @@ def load_runtime_config(
         "ARGUS_RUNTIME_MAX_BODY_BYTES": "max_body_bytes",
         "ARGUS_RUNTIME_TIMEOUT_SECONDS": "request_timeout_seconds",
         "ARGUS_RUNTIME_ALLOW_BUFFERED_STREAMING": "allow_buffered_streaming",
+        "ARGUS_RUNTIME_REQUIRE_CLIENT_AUTH": "require_client_auth",
+        "ARGUS_RUNTIME_PROTECT_METRICS": "protect_metrics",
+        "ARGUS_RUNTIME_APPROVAL_SERVICE_URL": "approval_service_url",
+        "ARGUS_RUNTIME_AUDIT_SINK_URL": "audit_sink_url",
+        "ARGUS_RUNTIME_APPROVAL_SERVICE_TIMEOUT_SECONDS": "approval_service_timeout_seconds",
+        "ARGUS_RUNTIME_AUDIT_SINK_TIMEOUT_SECONDS": "audit_sink_timeout_seconds",
+        "ARGUS_RUNTIME_AUDIT_SINK_MAX_RETRIES": "audit_sink_max_retries",
     }.items():
         if env.get(environment_name):
             merged[config_key] = env[environment_name]
@@ -52,6 +59,8 @@ def load_runtime_config(
             for header in env["ARGUS_RUNTIME_FORWARD_HEADERS"].split(",")
             if header.strip()
         ]
+    if isinstance(merged.get("audit_path"), str):
+        merged["audit_path"] = os.path.expandvars(merged["audit_path"])
     try:
         return RuntimeConfig.model_validate(merged)
     except Exception as exc:

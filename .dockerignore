@@ -6,4 +6,5 @@ __pycache__
 reports
 runtime-audit
 .env.runtime
+.env.production
 tests/__pycache__

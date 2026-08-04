@@ -27,7 +27,7 @@ class AuditWriter:
             last_line = self.path.read_text(encoding="utf-8").splitlines()[-1]
             value = json.loads(last_line)
             return str(value.get("event_hash", "GENESIS"))
-        except (OSError, IndexError, json.JSONDecodeError):
+        except (OSError, IndexError, UnicodeError, json.JSONDecodeError):
             return "GENESIS"
 
     def write(self, event: dict[str, Any]) -> dict[str, Any]:
@@ -65,7 +65,7 @@ class AuditWriter:
         previous_hash = "GENESIS"
         try:
             lines = Path(path).read_text(encoding="utf-8").splitlines()
-        except OSError:
+        except (OSError, UnicodeError):
             return False
         for line in lines:
             try:

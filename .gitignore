@@ -18,6 +18,7 @@ build/
 .env
 *.env
 .env.runtime
+.env.production
 
 # IDE
 .vscode/

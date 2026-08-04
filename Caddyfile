@@ -1,0 +1,6 @@
+{$ARGUS_DOMAIN} {
+    encode gzip
+    reverse_proxy runtime:8080 {
+        lb_policy round_robin
+    }
+}

@@ -91,6 +91,19 @@ docker compose --env-file .env.runtime -f docker-compose.runtime.yml up --build
 
 The upstream URL must be reachable from the gateway container. For a model running on the host, use `http://host.docker.internal:<port>/...`; for Kubernetes or another machine, use its service/DNS name or reachable HTTPS URL. Send non-streaming JSON (`"stream": false`); the gateway buffers responses so it can inspect them safely.
 
+The mock service is only for deterministic demos and CI. For TLS, authentication, approval, audit shipping, and replicas, use the production profile described in [WORKFLOW.md](WORKFLOW.md).
+
+Production baseline:
+
+```bash
+cp .env.production.example .env.production
+# Configure DNS, upstream, client token, approval service, and audit collector.
+docker compose --env-file .env.production \
+  -f docker-compose.production.yml up --build --scale runtime=2
+```
+
+Only Caddy is exposed publicly; clients must send `X-Argus-Client-Token`. The approval service and audit collector are external enterprise integrations, intentionally not auto-approved or stored in the demo repository.
+
 ## CI and development checks
 
 ```bash

@@ -34,15 +34,28 @@ class FakeResponse:
     async def read(self) -> bytes:
         return self.body
 
+    async def json(self) -> dict[str, Any]:
+        return json.loads(self.body)
+
 
 class FakeSession:
-    def __init__(self, response: FakeResponse) -> None:
-        self.response = response
+    def __init__(self, response: FakeResponse | list[FakeResponse]) -> None:
+        self.responses = response if isinstance(response, list) else [response]
         self.calls: list[dict[str, Any]] = []
 
-    def post(self, url: str, *, data: bytes, headers: dict[str, str]) -> FakeResponse:
-        self.calls.append({"url": url, "data": data, "headers": headers})
-        return self.response
+    def post(
+        self,
+        url: str,
+        *,
+        data: bytes | None = None,
+        headers: dict[str, str],
+        json: Any = None,
+        timeout: Any = None,
+    ) -> FakeResponse:
+        self.calls.append(
+            {"url": url, "data": data, "headers": headers, "json": json, "timeout": timeout}
+        )
+        return self.responses.pop(0)
 
 
 @pytest.mark.asyncio
@@ -207,6 +220,102 @@ async def test_gateway_rejects_streaming_by_default(tmp_path: Path) -> None:
     assert response.status == 501
     assert len(session.calls) == 0
     assert "STREAMING_UNSUPPORTED" in response.text
+
+
+@pytest.mark.asyncio
+async def test_gateway_uses_external_approval_service(tmp_path: Path) -> None:
+    config = load_runtime_config(
+        environ={"ARGUS_RUNTIME_AUDIT_PATH": str(tmp_path / "events.jsonl")}
+    ).model_copy(update={"approval_service_url": "http://approval.service/decide"})
+    session = FakeSession(
+        [
+            FakeResponse({"approved": True, "decision_id": "approval-123"}),
+            FakeResponse({"content": "The record was updated."}),
+        ]
+    )
+    gateway = RuntimeGateway(
+        config,
+        session=session,  # type: ignore[arg-type]
+        audit=AuditWriter(tmp_path / "events.jsonl"),
+    )
+
+    response = await gateway.handle_messages(
+        FakeRequest(
+            json.dumps(
+                {
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "name": "update_student_record",
+                                        "arguments": '{"email":"student@university.edu"}',
+                                    }
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ).encode()
+        )  # type: ignore[arg-type]
+    )
+
+    assert response.status == 200
+    assert session.calls[0]["json"]["tools"][0]["name"] == "update_student_record"
+    assert session.calls[0]["json"]["tools"][0]["arguments"]["email"] == "[REDACTED_EMAIL]"
+    audit = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+    assert "approval-123" in audit
+
+
+@pytest.mark.asyncio
+async def test_gateway_requires_client_auth_when_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ARGUS_RUNTIME_CLIENT_TOKEN", "client-secret")
+    config = load_runtime_config(
+        environ={"ARGUS_RUNTIME_AUDIT_PATH": str(tmp_path / "events.jsonl")}
+    ).model_copy(update={"require_client_auth": True})
+    session = FakeSession(FakeResponse({"content": "allowed"}))
+    gateway = RuntimeGateway(
+        config,
+        session=session,  # type: ignore[arg-type]
+        audit=AuditWriter(tmp_path / "events.jsonl"),
+    )
+    body = json.dumps({"messages": [{"role": "user", "content": "hello"}]}).encode()
+
+    rejected = await gateway.handle_messages(FakeRequest(body))  # type: ignore[arg-type]
+    accepted = await gateway.handle_messages(
+        FakeRequest(body, {"X-Argus-Client-Token": "client-secret"})  # type: ignore[arg-type]
+    )
+
+    assert rejected.status == 401
+    assert accepted.status == 200
+    assert len(session.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_gateway_ships_sanitized_audit_event(tmp_path: Path) -> None:
+    config = load_runtime_config(
+        environ={"ARGUS_RUNTIME_AUDIT_PATH": str(tmp_path / "events.jsonl")}
+    ).model_copy(update={"audit_sink_url": "http://audit.service/events"})
+    session = FakeSession([FakeResponse({"content": "ok"}), FakeResponse({"accepted": True})])
+    gateway = RuntimeGateway(
+        config,
+        session=session,  # type: ignore[arg-type]
+        audit=AuditWriter(tmp_path / "events.jsonl"),
+    )
+
+    await gateway.handle_messages(
+        FakeRequest(
+            json.dumps({"messages": [{"role": "user", "content": "private prompt"}]}).encode()
+        )  # type: ignore[arg-type]
+    )
+    await gateway.close()
+
+    assert len(session.calls) == 2
+    assert session.calls[1]["json"]["event_type"] == "runtime_request"
+    assert "private prompt" not in json.dumps(session.calls[1]["json"])
 
 
 def test_audit_hash_chain_and_hmac_are_verifiable(tmp_path: Path) -> None:

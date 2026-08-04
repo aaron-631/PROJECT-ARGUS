@@ -17,6 +17,17 @@ forward_headers:
   - anthropic-beta
   - openai-organization
   - openai-project
+require_client_auth: false
+client_auth_header: X-Argus-Client-Token
+client_auth_token_env: ARGUS_RUNTIME_CLIENT_TOKEN
+protect_metrics: true
+approval_service_url: null
+approval_service_token_env: ARGUS_RUNTIME_APPROVAL_SERVICE_TOKEN
+approval_service_timeout_seconds: 5
+audit_sink_url: null
+audit_sink_token_env: ARGUS_RUNTIME_AUDIT_SINK_TOKEN
+audit_sink_timeout_seconds: 5
+audit_sink_max_retries: 3
 approval_header: X-Argus-Approval-Token
 approval_token_env: ARGUS_RUNTIME_APPROVAL_TOKEN
 audit_path: ./runtime-audit/events.jsonl

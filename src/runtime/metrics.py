@@ -24,6 +24,10 @@ class RuntimeMetrics:
         with self._lock:
             self._counts["upstream_errors_total"] += 1
 
+    def observe_audit_ship_failure(self) -> None:
+        with self._lock:
+            self._counts["audit_ship_failures_total"] += 1
+
     def observe_redaction(self, count: int) -> None:
         if count:
             with self._lock:
@@ -58,6 +62,10 @@ class RuntimeMetrics:
                 "# HELP argus_runtime_upstream_errors_total Upstream transport errors.",
                 "# TYPE argus_runtime_upstream_errors_total counter",
                 f"argus_runtime_upstream_errors_total {values.get('upstream_errors_total', 0)}",
+                "# HELP argus_runtime_audit_ship_failures_total Failed remote audit deliveries.",
+                "# TYPE argus_runtime_audit_ship_failures_total counter",
+                "argus_runtime_audit_ship_failures_total "
+                f"{values.get('audit_ship_failures_total', 0)}",
                 "# HELP argus_runtime_redactions_total Redacted output values.",
                 "# TYPE argus_runtime_redactions_total counter",
                 f"argus_runtime_redactions_total {values.get('redactions_total', 0)}",

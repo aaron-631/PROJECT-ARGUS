@@ -1,0 +1,50 @@
+services:
+  runtime:
+    build: .
+    restart: unless-stopped
+    expose:
+      - "8080"
+    entrypoint: ["python", "runtime_gateway.py"]
+    command: ["--config", "/app/config/runtime/placement_agent.yaml", "--host", "0.0.0.0"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - ./config/runtime:/app/config/runtime:ro
+      - ./runtime-audit:/app/runtime-audit
+    environment:
+      ARGUS_RUNTIME_UPSTREAM_URL: ${ARGUS_RUNTIME_UPSTREAM_URL:?Set ARGUS_RUNTIME_UPSTREAM_URL}
+      ARGUS_RUNTIME_AUDIT_PATH: /app/runtime-audit/events-$${HOSTNAME}.jsonl
+      ARGUS_RUNTIME_REQUIRE_CLIENT_AUTH: "true"
+      ARGUS_RUNTIME_CLIENT_TOKEN: ${ARGUS_RUNTIME_CLIENT_TOKEN:?Set ARGUS_RUNTIME_CLIENT_TOKEN}
+      ARGUS_RUNTIME_APPROVAL_TOKEN: ${ARGUS_RUNTIME_APPROVAL_TOKEN:-}
+      ARGUS_RUNTIME_APPROVAL_SERVICE_URL: ${ARGUS_RUNTIME_APPROVAL_SERVICE_URL:?Set ARGUS_RUNTIME_APPROVAL_SERVICE_URL}
+      ARGUS_RUNTIME_APPROVAL_SERVICE_TOKEN: ${ARGUS_RUNTIME_APPROVAL_SERVICE_TOKEN:?Set ARGUS_RUNTIME_APPROVAL_SERVICE_TOKEN}
+      ARGUS_RUNTIME_AUDIT_KEY: ${ARGUS_RUNTIME_AUDIT_KEY:?Set ARGUS_RUNTIME_AUDIT_KEY}
+      ARGUS_RUNTIME_AUDIT_SINK_URL: ${ARGUS_RUNTIME_AUDIT_SINK_URL:?Set ARGUS_RUNTIME_AUDIT_SINK_URL}
+      ARGUS_RUNTIME_AUDIT_SINK_TOKEN: ${ARGUS_RUNTIME_AUDIT_SINK_TOKEN:?Set ARGUS_RUNTIME_AUDIT_SINK_TOKEN}
+
+  edge:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      runtime:
+        condition: service_healthy
+    environment:
+      ARGUS_DOMAIN: ${ARGUS_DOMAIN:?Set ARGUS_DOMAIN}
+    ports:
+      - "${ARGUS_HTTP_PORT:-80}:80"
+      - "${ARGUS_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
