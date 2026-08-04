@@ -631,6 +631,8 @@ class MCPScanner(BaseStaticScanner):
             for match in (
                 re.finditer(r"http://[^\s'\"]+", content)
                 if self._supports("ARGUS_ST_015", path, parsed_document)
+                and parsed_document.kind
+                not in {DocumentKind.JSON, DocumentKind.YAML, DocumentKind.TOML}
                 else []
             ):
                 host = match.group(0).split("//", 1)[1].split("/", 1)[0].split(":", 1)[0]
@@ -755,6 +757,7 @@ class MCPScanner(BaseStaticScanner):
                     self._supports("ARGUS_ST_015", path, parsed_document)
                     and isinstance(value, str)
                     and value.startswith("http://")
+                    and key_name not in {"$schema", "schema_url"}
                     and not value.startswith(("http://localhost", "http://127.0.0.1", "http://::1"))
                 ):
                     add(

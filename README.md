@@ -157,8 +157,64 @@ JSON/YAML/TOML values and common MCP layouts, including examples such as:
 This produces evidence for broad environment access, wildcard/admin
 permissions, missing approval on high-impact tools, unpinned package runners,
 and other applicable findings. A static scan cannot discover tools hidden
-behind a running server; run it against the server repository and use the
-runtime gateway or an authorized live integration test for deployed traffic.
+behind a running server. Use the explicit read-only MCP probe for live stdio or
+Streamable HTTP discovery:
+
+```bash
+.venv/bin/python argus.py mcp-probe \
+  --transport stdio \
+  --command npx \
+  --arg=-y \
+  --arg=@modelcontextprotocol/server-filesystem@2026.7.10 \
+  --arg=/approved/directory \
+  --timeout 120 \
+  --server-name filesystem \
+  --confirm-live \
+  --output ./reports/mcp-live
+```
+
+The probe sends only `initialize` and paginated `tools/list`; it never sends
+`tools/call`. A real server with write-capable tools may correctly produce a
+BLOCK report. A launched stdio server receives a minimal environment (`PATH`,
+temporary-directory variables, and platform launcher variables). Pass only
+additional values it truly needs with `--env CHILD_NAME=LOCAL_ENV_VAR`; Argus
+does not copy the whole shell environment into an untrusted server. For an
+authorized remote Streamable HTTP server:
+
+```bash
+export MCP_AUTHORIZATION='Bearer read-only-probe-token'
+.venv/bin/python argus.py mcp-probe \
+  --transport streamable-http \
+  --endpoint https://mcp.company.example/mcp \
+  --header-env Authorization=MCP_AUTHORIZATION \
+  --confirm-live \
+  --output ./reports/mcp-http
+```
+
+The default per-operation timeout is 15 seconds for a bounded review. The
+example uses 120 seconds because `npx` may download a package on its first run;
+preinstall the pinned package or keep the longer timeout for a cold start.
+
+If a reviewed stdio server needs one credential or configuration value, expose
+it explicitly:
+
+```bash
+export MCP_READ_TOKEN='read-only-token'
+.venv/bin/python argus.py mcp-probe --transport stdio \
+  --command python --arg ./reviewed_server.py \
+  --env MCP_READ_TOKEN=MCP_READ_TOKEN \
+  --confirm-live --output ./reports/mcp-stdio
+```
+
+Use a fixed package version, a narrow filesystem root, TLS, and a credential
+with discovery-only access. Legacy HTTP+SSE and custom MCP transports are not
+yet supported by `mcp-probe`; use the host agent's diagnostic command for
+those transports. The runtime gateway or an authorized live integration test
+still provides the deployed traffic control layer.
+
+`--confirm-live` is an authorization check, not a sandbox. A stdio server runs
+with the current operating-system user's permissions; only launch a reviewed
+command, or place it in a container/OS sandbox when the package is not trusted.
 
 ## Audit an OpenClaw installation
 
@@ -184,12 +240,18 @@ missing provenance record means “review required”; it is not by itself proof
 that a first-party skill is malicious.
 
 For live MCP connectivity, use OpenClaw's own authorized diagnostic first, then
-use Argus for repository evidence:
+use Argus for repository evidence or an explicit read-only probe:
 
 ```bash
 openclaw mcp doctor --probe
 openclaw mcp list --json > /tmp/openclaw-mcp.json
 .venv/bin/python argus.py audit --target /tmp/openclaw-mcp.json
+
+# If the configured server is stdio, copy its reviewed command and arguments:
+.venv/bin/python argus.py mcp-probe --transport stdio \
+  --command npx --arg=-y --arg=@company/reviewed-mcp@1.2.3 \
+  --arg=/approved/root --timeout 120 --confirm-live \
+  --output ./reports/openclaw-live-mcp
 ```
 
 Argus does not launch skill code or MCP servers during a static audit. This is

@@ -110,6 +110,7 @@ The main orchestration is in `argus.py` and `src/core/engine.py`.
 | `src/core/evaluation.py` | Canonical response signals, heuristics, judge integration |
 | `src/core/risk_engine.py` | Bounded contextual risk calculation |
 | `src/core/target_client.py` | Provider-neutral HTTP target adapter |
+| `src/core/mcp_probe.py` | Explicit read-only stdio and Streamable HTTP `tools/list` discovery |
 | `src/core/rate_limiter.py` | Token bucket, retry delays, and `Retry-After` parsing |
 | `src/modules/scanners/mcp_scanner.py` | Deterministic agent, MCP server, and tool-permission rules |
 | `src/modules/attacks/` | Versioned attack modules and dataset loading |
@@ -429,8 +430,67 @@ The recommendation is least privilege: name the exact directory, domain,
 command, environment variables, and business action required; validate the
 arguments; and put a human approval step immediately before an irreversible
 side effect. Static analysis cannot enumerate tools hidden behind a running
-remote server, so pair the repository scan with an authorized protocol/runtime
-test and route production traffic through V2.
+remote server, so pair the repository scan with `mcp-probe` and route
+production traffic through V2.
+
+### Live read-only MCP discovery
+
+`mcp-probe` is intentionally a separate command. A normal `audit` never starts
+an untrusted process or contacts a server. The live probe requires
+`--confirm-live` and performs only this sequence:
+
+```text
+connect → initialize → notifications/initialized → tools/list (all pages) → close
+```
+
+It never sends `tools/call`. The discovered tool definitions are sanitized and
+fed into the same deterministic MCP rules used for repository scans. This
+means a live server can produce findings for weak schemas, dangerous tool
+names, missing approval metadata, and other configured controls.
+
+For a local stdio server:
+
+```bash
+.venv/bin/python argus.py mcp-probe \
+  --transport stdio \
+  --command npx \
+  --arg=-y \
+  --arg=@modelcontextprotocol/server-filesystem@2026.7.10 \
+  --arg=/approved/directory \
+  --timeout 120 \
+  --confirm-live \
+  --output ./reports/mcp-live
+```
+
+For Streamable HTTP, use an HTTPS endpoint and load credentials from an
+environment variable:
+
+```bash
+export MCP_AUTHORIZATION='Bearer read-only-probe-token'
+.venv/bin/python argus.py mcp-probe \
+  --transport streamable-http \
+  --endpoint https://mcp.company.example/mcp \
+  --header-env Authorization=MCP_AUTHORIZATION \
+  --confirm-live \
+  --output ./reports/mcp-http
+```
+
+The default per-operation timeout is 15 seconds for a bounded review. The
+stdio example uses 120 seconds because `npx` may download a package on its
+first run; preinstall the pinned package or keep the longer timeout for a cold
+start.
+
+The implementation follows MCP JSON-RPC pagination and tracks a returned
+`Mcp-Session-Id`. It accepts either JSON or SSE responses from a Streamable
+HTTP POST, bounds response and tool metadata size, and closes the session when
+possible. It does not disable TLS verification or put header values in the
+report. A stdio child receives only a small launcher/runtime environment by
+default; use repeatable `--env CHILD_NAME=LOCAL_ENV_VAR` for an explicitly
+reviewed value. On POSIX, the child is placed in its own process group so
+cleanup can terminate its descendants; this is lifecycle cleanup, not a
+security sandbox. `--confirm-live` means the operator authorized execution;
+the server still runs with the current OS user's permissions. Legacy HTTP+SSE
+and custom transports remain explicit future adapters.
 
 ## 6.6 OpenClaw skills and MCP workflow
 
@@ -507,7 +567,20 @@ command/host, verification metadata, tool names, approval metadata, and each
 discovered skill's provenance status. It intentionally omits environment
 values, tool descriptions, raw URLs with query strings, and model responses. For deployed model traffic, put
 the V2 gateway or an organization-approved equivalent in front of the model;
-the pre-deployment report alone cannot enforce a running tool call.
+the pre-deployment report alone cannot enforce a running tool call. If an
+OpenClaw server is stdio-based, copy its reviewed command and run the explicit
+probe; do not ask Argus to infer or launch commands from an unreviewed config:
+
+```bash
+.venv/bin/python argus.py mcp-probe --transport stdio \
+  --command npx --arg=-y --arg=@company/reviewed-mcp@1.2.3 \
+  --arg=/approved/root --timeout 120 --server-name openclaw-mcp \
+  --confirm-live --output ./reports/openclaw-live-mcp
+```
+
+The report shows the discovered server metadata, every tool name, the number
+of pages read, and `tool_calls: 0`. A BLOCK result means the discovered tool
+surface needs review; it does not mean the probe executed the dangerous tool.
 
 ### 6.6.1 Real-world verification run
 
@@ -520,7 +593,7 @@ mock endpoint:
 | Claude Code 2.1.199 | `$HOME/.claude/settings.local.json` | PASS at the default HIGH gate; one MEDIUM HTTP-endpoint finding |
 | Codex CLI 0.146.0 | `$HOME/.codex/config.toml` | PASS; no findings and no MCP declarations in this file |
 | Gemini CLI 0.49.0 | `$HOME/.gemini/config/config.json` and `config/mcp_config.json` | PASS; no findings and no MCP declarations in those files |
-| Official MCP server 2026.7.10 | `@modelcontextprotocol/server-filesystem` launched over stdio with one temporary directory as its only allowed root | `initialize` and `tools/list` completed; 14 tools were returned; no tool was invoked |
+| Official MCP server 2026.7.10 | `mcp-probe` launched `@modelcontextprotocol/server-filesystem` over stdio with one temporary directory as its only allowed root | 14 tools discovered, 1 page read, 0 tool calls; Argus returned BLOCK for 2 HIGH findings |
 
 The reproducible static commands were:
 
@@ -531,9 +604,18 @@ The reproducible static commands were:
 ```
 
 The MCP runtime check used the official package at a fixed version, sent only
-the MCP `initialize` and `tools/list` requests, and kept the server's allowed
-root under `/tmp`. It did not call `write_file`, `edit_file`, or any other
-side-effecting tool.
+the MCP `initialize` and paginated `tools/list` requests, and kept the
+server's allowed root under `/tmp`. It did not call `write_file`, `edit_file`,
+or any other side-effecting tool. The reproducible command was:
+
+```bash
+.venv/bin/python argus.py mcp-probe --transport stdio \
+  --command npx --arg=-y \
+  --arg=@modelcontextprotocol/server-filesystem@2026.7.10 \
+  --arg=/tmp/argus-real-mcp-root --timeout 120 \
+  --server-name official-filesystem \
+  --confirm-live --output ./reports/real-mcp
+```
 
 The MCP server was started with a fixed package version and an isolated
 temporary directory. Argus also scanned the downloaded package tree. That run
@@ -545,12 +627,25 @@ feedback a real integration run should produce before a security tool is used
 in CI.
 
 The live MCP protocol check proves that a real stdio server can start and
-advertise tools. The current Argus static scanner does not yet consume a
-remote server's `tools/list` response automatically; it scans the config or
-server repository and keeps server execution opt-in. For a deployed server,
-capture an authorized tool inventory with the host agent's diagnostic command
-and audit that JSON alongside the server source. Do not claim that a static
-report alone proves the live tool implementation is safe.
+advertise tools, and the Argus report evaluates those live definitions. The
+probe remains discovery-only: it does not prove that a tool implementation is
+safe, and production traffic still needs the runtime gateway or an approved
+equivalent enforcement layer.
+
+The successful report's important evidence was:
+
+```text
+Decision: BLOCK
+MCP: stdio:npx, protocol 2025-06-18, 1 page, 14 tools, 0 tool calls
+HIGH ARGUS_ST_002: read_file has an input schema without enough constraints
+HIGH ARGUS_ST_017: write_file is high-impact and has no approval checkpoint
+```
+
+This is useful security feedback, not a generic “server is bad” label: the
+filesystem server was reachable and its tool inventory was real, while Argus
+identified two controls the host should add before exposing those tools to an
+agent. The report also lists all 14 names so an operator can compare the live
+surface with the reviewed configuration.
 
 No live OpenAI, Anthropic, Gemini API, or Ollama model probe was claimed in this
 run: no API key was available and no Ollama service was running. To produce
@@ -1494,11 +1589,11 @@ Current limits:
 - the V2 gateway can enforce the defined policies on traffic routed through it, but it does not automatically observe traffic that bypasses the gateway;
 - the gateway includes shared-token authentication and a Compose/Caddy replica topology, but not OIDC/mTLS, distributed coordination, dashboard/SIEM product integration, or multi-region failover;
 - remote audit shipping is retrying best-effort; local per-replica files remain necessary until the collector confirms durable acceptance;
-- Argus statically inspects MCP definitions in the repository but does not speak every MCP transport to enumerate tools from a remote server;
+- `mcp-probe` enumerates paginated tools over stdio and Streamable HTTP, but legacy HTTP+SSE and custom MCP transports still need adapters;
 - token-by-token streaming is not supported; responses are buffered for inspection;
 - the default semantic judge is disabled.
 
-Natural next steps would be a larger curated dataset, richer workflow schema support, native authenticated MCP transport adapters, policy-aware tool-call replay, OIDC/mTLS integration, distributed coordination, and Prometheus/SIEM dashboards. These hardening steps are intentionally separate from the compact local demo.
+Natural next steps would be a larger curated dataset, richer workflow schema support, legacy HTTP+SSE/custom MCP adapters, policy-aware tool-call replay, OIDC/mTLS integration, distributed coordination, and Prometheus/SIEM dashboards. These hardening steps are intentionally separate from the compact local demo.
 
 ## 16. Final mental model
 
@@ -1522,10 +1617,11 @@ A strong portfolio project is not one that claims to solve everything. It is one
 
 | Area | Implemented in this repository | Evidence |
 | --- | --- | --- |
-| CLI workflow | `argus.py scan` with profiles, output, endpoint, threshold, and verbose mode | `argus.py` |
+| CLI workflow | `argus.py scan` plus explicit `mcp-probe` with profiles, output, thresholds, and verbose mode | `argus.py` |
 | Safe source ingestion | Local files and shallow Git with size, path, symlink, binary, and encoding checks | `src/core/ingress.py`, ingress tests |
 | Structured analysis | JSON/YAML/TOML parsing plus Python AST analysis | `src/core/documents.py`, capability tests |
 | Security rules | 27 deterministic agent/MCP/skill static rules with evidence and remediation | `src/modules/scanners/mcp_scanner.py` |
+| Live MCP discovery | Read-only stdio and Streamable HTTP `initialize`/paginated `tools/list`; never `tools/call` | `src/core/mcp_probe.py`, `tests/unit/test_mcp_probe.py` |
 | Dynamic probing | Three attack families with three versioned payloads each | `src/modules/attacks/`, dataset tests |
 | Resilience | Concurrency bound, rate limiter, timeout, retry, backoff, and `Retry-After` parsing | `src/core/engine.py`, `src/core/rate_limiter.py`, resilience tests |
 | Output contracts | Pydantic models, strict fields, generated JSON Schemas, JSON and Markdown exporters | `src/models/`, `src/reporting/` |
@@ -1547,7 +1643,7 @@ These are honest V1 limits, not hidden failures:
 | Enterprise runtime operations | V2 includes client-token auth, Caddy TLS, replica topology, approval/audit integrations, and metrics, but not OIDC/mTLS, distributed coordination, or a managed SIEM product |
 | Complete coverage of every agent framework | The rules cover defined patterns and formats, not the whole ecosystem |
 | Automatic agent login or credential discovery | Target keys and extra headers must be explicitly supplied through environment variables; Argus does not read or reuse an agent's private login database |
-| Full live MCP protocol inspection | Static config/repository scanning is implemented; native authenticated enumeration of every stdio, SSE, and Streamable HTTP server is still a separate adapter |
+| Full live MCP protocol inspection | Read-only stdio and Streamable HTTP discovery is implemented; legacy SSE and custom transports still need adapters, and tool execution is intentionally never tested |
 | A hosted dashboard or multi-tenant service | Local-first operation keeps the security boundary small |
 | Guaranteed model safety | A finite payload set cannot prove safety against every future attack |
 | Automatic encryption of every report | Sanitized reports and the separate vault utility have different responsibilities |
@@ -1730,6 +1826,7 @@ Before an interview, you should be able to do all of these without opening anoth
 - run a static scan and find the two output files;
 - start the mock and run a live scan in two terminals;
 - explain why the demo uses `--fail-on CRITICAL`;
+- run `mcp-probe` against an authorized stdio or Streamable HTTP server and explain why it makes zero tool calls;
 - explain why a normal high-risk result returns `10` instead of `1`;
 - name the three attack families;
 - explain one static rule from input to finding to remediation;
@@ -1744,6 +1841,6 @@ Before an interview, you should be able to do all of these without opening anoth
 - run the reusable `docker-compose.runtime.yml` with a configured upstream URL;
 - explain why container DNS, TLS/authentication, secret injection, and `stream: false` matter;
 - state at least three limits without pretending they are solved;
-- answer “what would you build next?” with native authenticated MCP transports, broader datasets, OIDC/mTLS integration, distributed coordination, and SIEM dashboards.
+- answer “what would you build next?” with legacy/custom MCP transports, broader datasets, OIDC/mTLS integration, distributed coordination, and SIEM dashboards.
 
 If you can do those things, you understand the project rather than merely memorizing its README.

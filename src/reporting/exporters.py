@@ -136,16 +136,25 @@ class MarkdownExporter(BaseExporter):
                 )
         if tools:
             lines.extend(["", "### Tools", ""])
-            for tool in tools:
-                approval = (
-                    "approval configured"
-                    if tool.get("approval_required")
-                    else "no approval metadata"
-                )
-                lines.append(
-                    f"- `{tool.get('name', 'unknown')}` ({approval}) "
-                    f"from `{tool.get('file', 'unknown')}`"
-                )
+        for tool in tools:
+            approval = (
+                "approval configured" if tool.get("approval_required") else "no approval metadata"
+            )
+            lines.append(
+                f"- `{tool.get('name', 'unknown')}` ({approval}) "
+                f"from `{tool.get('file', 'unknown')}`"
+            )
+        probe = report.summary.get("mcp_probe")
+        if isinstance(probe, dict):
+            lines.extend(["", "## MCP live probe", ""])
+            lines.append(f"- Transport: `{probe.get('transport', 'unknown')}`")
+            lines.append(f"- Target: `{probe.get('target', 'unknown')}`")
+            lines.append(f"- Protocol: `{probe.get('protocol_version', 'unknown')}`")
+            lines.append(f"- Pages read: **{probe.get('pages', 0)}**")
+            lines.append(f"- Tools discovered: **{probe.get('tool_count', 0)}**")
+            lines.append("- Tool calls made: **0** (read-only discovery)")
+            if probe.get("server_info"):
+                lines.append(f"- Server info: `{probe['server_info']}`")
         lines.extend(["", "## Skill inventory", ""])
         lines.append(f"Discovered skills: **{len(skills)}**")
         for skill in skills:

@@ -183,3 +183,26 @@ def test_package_repository_url_is_not_treated_as_mcp_endpoint(tmp_path: Path) -
     result = asyncio.run(ArgusEngine(load_config()).run(ingest_local(str(tmp_path))))
 
     assert "ARGUS_ST_013" not in {finding["rule_id"] for finding in result["findings"]}
+
+
+def test_json_schema_reference_is_not_treated_as_insecure_endpoint(tmp_path: Path) -> None:
+    (tmp_path / "mcp.json").write_text(
+        json.dumps(
+            {
+                "tools": [
+                    {
+                        "name": "read_file",
+                        "inputSchema": {
+                            "$schema": "http://json-schema.org/draft-07/schema#",
+                            "type": "object",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = asyncio.run(ArgusEngine(load_config()).run(ingest_local(str(tmp_path))))
+
+    assert "ARGUS_ST_015" not in {finding["rule_id"] for finding in result["findings"]}

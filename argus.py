@@ -8,12 +8,22 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 
 from src.core.config import ConfigurationError, load_config
 from src.core.engine import ArgusEngine
 from src.core.ingress import IngressError, ingest
+from src.core.mcp_probe import (
+    MCPProbeError,
+    MCPProbeLimits,
+    MCPProbeResult,
+    build_probe_context,
+    probe_stdio,
+    probe_streamable_http,
+    probe_summary,
+)
 from src.models.config import TargetConfig
 from src.reporting import JSONExporter, MarkdownExporter
 from src.utils.logger import configure_logging
@@ -72,6 +82,61 @@ def build_parser() -> argparse.ArgumentParser:
         "--fail-on", choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"], default=None
     )
     scan_parser.add_argument("--verbose", action="store_true", help="Enable diagnostic logging")
+    probe_parser = subparsers.add_parser(
+        "mcp-probe",
+        help="Explicitly connect to an MCP server and read-only discover its tools",
+    )
+    probe_parser.add_argument("--transport", required=True, choices=["stdio", "streamable-http"])
+    probe_parser.add_argument(
+        "--command",
+        dest="mcp_command",
+        default=None,
+        help="stdio executable, for example npx or python",
+    )
+    probe_parser.add_argument(
+        "--arg",
+        action="append",
+        default=[],
+        help="One stdio argument; repeat for each argument (use --arg=value for values starting with -)",  # noqa: E501
+    )
+    probe_parser.add_argument("--endpoint", default=None, help="Streamable HTTP MCP endpoint")
+    probe_parser.add_argument("--server-name", default="live-mcp-server")
+    probe_parser.add_argument(
+        "--header-env",
+        action="append",
+        default=[],
+        metavar="HEADER=ENV_VAR",
+        help="Read an HTTP header from an environment variable (repeatable)",
+    )
+    probe_parser.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="NAME=ENV_VAR",
+        help="Expose an environment variable to a stdio server (repeatable)",
+    )
+    probe_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=15.0,
+        help="Per-operation timeout in seconds; use 120 for a cold npx/uvx install",
+    )
+    probe_parser.add_argument("--max-tools", type=int, default=1000)
+    probe_parser.add_argument("--max-pages", type=int, default=100)
+    probe_parser.add_argument("--max-response-bytes", type=int, default=2_000_000)
+    probe_parser.add_argument("--max-tool-bytes", type=int, default=100_000)
+    probe_parser.add_argument("--profile", default="default", help="Configuration profile name")
+    probe_parser.add_argument("--output", default=None, help="Report output directory")
+    probe_parser.add_argument("--config", default=None, help="Path to default YAML configuration")
+    probe_parser.add_argument(
+        "--fail-on", choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"], default=None
+    )
+    probe_parser.add_argument(
+        "--confirm-live",
+        action="store_true",
+        help="Confirm that launching/contacting this MCP server is authorized",
+    )
+    probe_parser.add_argument("--verbose", action="store_true", help="Enable diagnostic logging")
     return parser
 
 
@@ -113,6 +178,18 @@ def _header_env_values(values: list[str]) -> dict[str, str]:
     return parsed
 
 
+def _read_selected_environment(values: list[str], option: str) -> dict[str, str]:
+    mapping = _header_env_values(values)
+    selected: dict[str, str] = {}
+    for child_name, environment_name in mapping.items():
+        if environment_name not in os.environ:
+            raise ConfigurationError(
+                f"{option} references an unset environment variable: {environment_name}"
+            )
+        selected[child_name] = os.environ[environment_name]
+    return selected
+
+
 def _apply_target_options(config, args: argparse.Namespace):
     updates: dict[str, object] = {}
     for argument, field in (
@@ -144,11 +221,7 @@ def _print_summary(
     )
     errors = summary.get("errors", [])
     decision = (
-        "BLOCK"
-        if exit_code == EXIT_FINDINGS
-        else "ERROR"
-        if exit_code == EXIT_ERROR
-        else "PASS"
+        "BLOCK" if exit_code == EXIT_FINDINGS else "ERROR" if exit_code == EXIT_ERROR else "PASS"
     )
     print(f"[Argus] Decision: {decision}")
     print(
@@ -191,14 +264,138 @@ def run_scan(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def _mcp_probe_server_metadata(args: argparse.Namespace) -> dict[str, object]:
+    if args.transport == "stdio":
+        return {
+            "name": args.server_name,
+            "file": "mcp-probe.json",
+            "transport": "stdio",
+            "command": Path(args.mcp_command or "unknown").name,
+            "host": None,
+            "verified": False,
+        }
+    from urllib.parse import urlsplit
+
+    parsed = urlsplit(args.endpoint or "")
+    return {
+        "name": args.server_name,
+        "file": "mcp-probe.json",
+        "transport": "streamable-http",
+        "command": None,
+        "host": parsed.hostname,
+        "verified": False,
+    }
+
+
+def _run_mcp_probe_report(
+    args: argparse.Namespace, config, result=None, error: str | None = None
+) -> tuple[list[Path], dict]:
+    if result is None:
+        context = build_probe_context(
+            MCPProbeResult(
+                transport=args.transport,
+                target=(args.endpoint or f"stdio:{Path(args.mcp_command or 'unknown').name}"),
+                protocol_version="unknown",
+                server_info={},
+                tools=[],
+                pages=0,
+                session_id_present=False,
+            )
+        )
+    else:
+        context = build_probe_context(result)
+    results = asyncio.run(ArgusEngine(config).run(context))
+    results["summary"]["mcp_servers"] = [
+        _mcp_probe_server_metadata(args),
+        *results["summary"].get("mcp_servers", []),
+    ]
+    if result is not None:
+        results["summary"]["mcp_probe"] = probe_summary(result, args.server_name)
+    if error:
+        results["summary"].setdefault("errors", []).append(error)
+        results["summary"]["decision"] = "ERROR"
+    written = _write_reports(results, config, args.output)
+    return written, results
+
+
+def run_mcp_probe(args: argparse.Namespace) -> int:
+    configure_logging(bool(getattr(args, "verbose", False)))
+    if not args.confirm_live:
+        raise ConfigurationError(
+            "mcp-probe requires --confirm-live because it starts or contacts a live MCP server"
+        )
+    config = load_config(profile=args.profile, config_path=args.config)
+    if args.fail_on:
+        reporting = config.reporting.model_copy(update={"fail_on": args.fail_on})
+        config = config.model_copy(update={"reporting": reporting})
+    headers = _read_selected_environment(args.header_env, "--header-env")
+    process_environment = _read_selected_environment(args.env, "--env")
+    limits = MCPProbeLimits(
+        timeout_seconds=args.timeout,
+        max_tools=args.max_tools,
+        max_pages=args.max_pages,
+        max_response_bytes=args.max_response_bytes,
+        max_tool_bytes=args.max_tool_bytes,
+    )
+    try:
+        if args.transport == "stdio":
+            if not args.mcp_command:
+                raise ConfigurationError("--command is required for stdio MCP probing")
+            result = asyncio.run(
+                probe_stdio(
+                    [args.mcp_command, *args.arg],
+                    server_name=args.server_name,
+                    environment=process_environment,
+                    limits=limits,
+                )
+            )
+        else:
+            if not args.endpoint:
+                raise ConfigurationError("--endpoint is required for Streamable HTTP probing")
+            result = asyncio.run(
+                probe_streamable_http(
+                    args.endpoint,
+                    headers=headers,
+                    server_name=args.server_name,
+                    limits=limits,
+                )
+            )
+        written, results = _run_mcp_probe_report(args, config, result=result)
+    except MCPProbeError as exc:
+        written, results = _run_mcp_probe_report(
+            args, config, error=f"mcp probe failed: {type(exc).__name__}"
+        )
+        print(f"[Argus] MCP probe failed: {type(exc).__name__}", file=sys.stderr)
+        for path in written:
+            print(f"[Argus] Report written: {path}")
+        return EXIT_ERROR
+    decision = results["summary"].get("decision", "UNKNOWN")
+    exit_code = _exit_for_results(results, args.fail_on or config.reporting.fail_on)
+    print(f"[Argus] Decision: {'BLOCK' if exit_code == EXIT_FINDINGS else 'PASS'}")
+    print(
+        f"[Argus] MCP transport: {args.transport}; tools discovered: "
+        f"{results['summary'].get('mcp_probe', {}).get('tool_count', 0)}"
+    )
+    print("[Argus] Tool calls: 0 (read-only discovery)")
+    if decision == "ERROR":
+        return EXIT_ERROR
+    for path in written:
+        print(f"[Argus] Report written: {path}")
+    return exit_code
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command not in {"scan", "audit"}:
+    if args.command in {"scan", "audit"}:
+        runner = run_scan
+    elif args.command == "mcp-probe":
+        runner = run_mcp_probe
+    else:
         parser.print_help()
         return EXIT_USAGE
     try:
-        return run_scan(args)
+        return runner(args)
     except (ConfigurationError, IngressError, ValueError, OSError) as exc:
         print(f"[Argus] Error: {exc}", file=sys.stderr)
         return EXIT_ERROR
