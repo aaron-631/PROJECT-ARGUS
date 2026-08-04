@@ -111,7 +111,7 @@ The main orchestration is in `argus.py` and `src/core/engine.py`.
 | `src/core/risk_engine.py` | Bounded contextual risk calculation |
 | `src/core/target_client.py` | Provider-neutral HTTP target adapter |
 | `src/core/rate_limiter.py` | Token bucket, retry delays, and `Retry-After` parsing |
-| `src/modules/scanners/mcp_scanner.py` | The 15 deterministic static rules |
+| `src/modules/scanners/mcp_scanner.py` | Deterministic agent, MCP server, and tool-permission rules |
 | `src/modules/attacks/` | Versioned attack modules and dataset loading |
 | `src/runtime/` | Runtime proxy, policy enforcement, audit writer, and metrics |
 | `runtime_gateway.py` | Runtime gateway entry point for local or Compose execution |
@@ -267,7 +267,7 @@ To use Argus as a normal deployment gate, omit `--fail-on CRITICAL`. The default
 
 Stop the mock with `Ctrl-C` when finished.
 
-### 6.2 Target contract
+### 6.2 Target contract and provider adapters
 
 `src/core/target_client.py` sends this provider-neutral request:
 
@@ -298,7 +298,39 @@ Argus can extract text from common response shapes:
 {"response": "I cannot help with that."}
 ```
 
-This adapter is intentionally provider-neutral. It does not assume one cloud vendor or SDK.
+The `generic` adapter is intentionally provider-neutral. For real services,
+`--provider` selects a request shape without adding a vendor SDK dependency:
+
+| Provider | Request shape | Typical endpoint | Credential source |
+| --- | --- | --- | --- |
+| `openai` | Chat Completions; also recognizes `/responses` | OpenAI or an OpenAI-compatible gateway | `OPENAI_API_KEY` by default |
+| `anthropic` | Messages API with `x-api-key` and `anthropic-version` | Anthropic `/v1/messages` | `ANTHROPIC_API_KEY` by default |
+| `ollama` | `/api/chat`, non-streaming | Local Ollama | No key by default |
+| `generic` | The request above, including `attack_type` | Internal adapter or the test fixture | No key by default |
+
+Example commands for an authorized real endpoint:
+
+```bash
+export OPENAI_API_KEY='read from your secret manager in CI'
+.venv/bin/python argus.py audit \
+  --target ./my-agent \
+  --endpoint https://api.openai.com/v1/chat/completions \
+  --provider openai --model gpt-4o-mini \
+  --output ./reports/openai
+
+export ANTHROPIC_API_KEY='read from your secret manager in CI'
+.venv/bin/python argus.py audit \
+  --target ./my-agent \
+  --endpoint https://api.anthropic.com/v1/messages \
+  --provider anthropic --model claude-3-5-haiku-20241022
+```
+
+For a private gateway with a different header, use `--api-key-env` and
+`--auth-header`. Additional non-secret headers can use repeated
+`--header-env HEADER=ENV_VAR`. The key and header values are resolved only at
+process startup; the configuration saved in `report.json` contains names, not
+secret values. A provider adapter changes request formatting only. It does not
+grant Argus access to a target or bypass the target's own authorization.
 
 ### 6.3 Testing failure behavior
 
@@ -333,16 +365,146 @@ curl -i 'http://127.0.0.1:8765/v1/messages?mode=reset' \
 Only do this against an endpoint and data you are authorized to test:
 
 ```bash
-.venv/bin/python argus.py scan \
+.venv/bin/python argus.py audit \
   --target ./my-agent-config \
-  --endpoint https://authorized.example/v1/messages \
+  --endpoint https://authorized.example/v1/chat/completions \
+  --provider openai --model company-approved-model \
   --profile banking_agent \
   --output ./reports/authorized-test
 ```
 
-For V1 dynamic scans, if the endpoint requires custom authentication headers, extend the target adapter or add a small authenticated adapter; the current scan target client sends `Content-Type: application/json` and does not expose a CLI header flag. HTTP judge headers configure the optional judge call, not the target call. V2 has its own configurable upstream-header allowlist.
+If the endpoint is company-specific, use `--provider generic` when it accepts
+the generic contract, or make it OpenAI-compatible at the gateway boundary.
+This keeps Argus usable across providers while keeping the scope of each
+integration explicit. A missing model or failed transport returns an error;
+Argus never treats “the model could not be reached” as proof that it was safe.
 
-## 6.5 Runtime monitoring and blocking gateway (Argus V2)
+### 6.5 MCP server and tool scanning
+
+MCP is a major part of the practical threat surface because an LLM may be able
+to call tools with filesystem, network, database, email, or shell access. Argus
+scans the repository that defines or launches the MCP server. It does not run
+the server or execute its tools during static analysis.
+
+Common layouts are handled because the scanner walks every structured JSON,
+YAML, and TOML document rather than depending on one filename:
+
+```json
+{
+  "mcpServers": {
+    "placement": {
+      "command": "npx",
+      "args": ["@company/placement-mcp"],
+      "env": {"*": "inherit"}
+    }
+  },
+  "tools": [
+    {
+      "name": "send_email",
+      "description": "Send email to any address",
+      "permissions": ["*"]
+    }
+  ]
+}
+```
+
+The resulting checks are intentionally understandable:
+
+- `ARGUS_ST_001` and `ARGUS_ST_016`: wildcard paths or administrative tool permissions;
+- `ARGUS_ST_002`: a tool schema has fields but no meaningful bounds, enum, or pattern;
+- `ARGUS_ST_011`: `env`, `pass_env`, or `environment` inherits every process variable;
+- `ARGUS_ST_013`: a remote MCP server has no verification metadata;
+- `ARGUS_ST_017`: email, offer, record-update, export, shell, or similar high-impact tool has no approval flag;
+- `ARGUS_ST_018`: network or egress scope is `*`/`all`;
+- `ARGUS_ST_019`: `npx`, `uvx`, or `pipx` starts an unpinned package;
+- `ARGUS_ST_020`: an MCP service binds to every interface;
+- `ARGUS_ST_021`: TLS verification is explicitly disabled.
+
+The recommendation is least privilege: name the exact directory, domain,
+command, environment variables, and business action required; validate the
+arguments; and put a human approval step immediately before an irreversible
+side effect. Static analysis cannot enumerate tools hidden behind a running
+remote server, so pair the repository scan with an authorized protocol/runtime
+test and route production traffic through V2.
+
+## 6.6 OpenClaw skills and MCP workflow
+
+OpenClaw makes the security boundary concrete: skills are `SKILL.md` instruction
+files, MCP servers are configured under `mcp.servers`, and tool profiles can
+expose filesystem, runtime, web, messaging, or plugin capabilities. The
+official guidance treats third-party skills as untrusted code and provides
+`openclaw mcp doctor --probe`/`probe` for live MCP connectivity. Argus complements
+that workflow with a safe repository audit. See the [OpenClaw skills guide](https://docs.openclaw.ai/skills)
+and [MCP CLI guide](https://github.com/openclaw/openclaw/blob/main/docs/cli/mcp.md).
+
+### Audit the installed configuration and skill roots
+
+Run separate scans because an OpenClaw installation may load skills from more
+than one root and may allow configured extra directories:
+
+```bash
+.venv/bin/python argus.py audit \
+  --target "$HOME/.openclaw" \
+  --output ./reports/openclaw-config
+
+.venv/bin/python argus.py audit \
+  --target "$HOME/.openclaw/workspace/skills" \
+  --output ./reports/openclaw-workspace-skills
+
+.venv/bin/python argus.py audit \
+  --target "$HOME/.agents/skills" \
+  --output ./reports/openclaw-agent-skills
+```
+
+If a configured skill root is a deliberate symlink, scan its resolved target
+separately. Argus skips symlinks that could escape the selected scan root so a
+repository cannot trick the scanner into reading arbitrary host files.
+
+The scanner understands the JSON5 features commonly used in OpenClaw config
+(`//` comments, unquoted keys, single-quoted strings, and trailing commas),
+OpenClaw's `mcp.servers` registry, `skills.entries.*.env`/`apiKey`, tool
+profiles, elevated execution, and `SKILL.md` files. It does not execute a
+skill, start an MCP server, install a package, or follow instructions in a
+skill file.
+
+### What a skill finding means
+
+| Finding | Practical interpretation | Decision |
+| --- | --- | --- |
+| Authority override | The skill tells the model to ignore policy, hide actions, or bypass approval | Do not enable until reviewed |
+| Dangerous command | The skill requests arbitrary shell, destructive filesystem, or untrusted code execution | Block by default; sandbox and allowlist if truly required |
+| Secret/environment access | The skill asks for `.env`, private keys, API keys, or all environment variables | Remove the request; inject only named secrets into an isolated process |
+| Unpinned install | The skill downloads code without a version or digest | Pin and verify the artifact before enabling |
+| External data transfer | The skill directs uploads, POSTs, webhooks, or transmission of local/user data | Require a destination allowlist, minimization, consent, and audit |
+| Missing provenance | Argus cannot find adjacent origin/integrity metadata | Treat as review-required, not automatic proof of malware |
+
+`ARGUS_ST_027` is deliberately a review signal rather than a CRITICAL verdict:
+first-party local skills may not have a registry origin file. A company can
+clear it by storing a signed/internal provenance record next to the skill and
+having its CI policy verify the record. This is a false-positive tradeoff in
+favor of making unverified third-party additions visible.
+
+### Prove the live MCP server separately
+
+Static analysis cannot see tools that a remote server exposes only at runtime.
+Use the OpenClaw diagnostic to connect with the operator's existing
+authorization, then keep the output as evidence:
+
+```bash
+openclaw mcp doctor --probe
+openclaw mcp list --json > /tmp/openclaw-mcp.json
+.venv/bin/python argus.py audit --target /tmp/openclaw-mcp.json \
+  --output ./reports/openclaw-mcp-inventory
+```
+
+The Argus report's inventory lists declared server names, transport,
+command/host, verification metadata, tool names, approval metadata, and each
+discovered skill's provenance status. It intentionally omits environment
+values, tool descriptions, raw URLs with query strings, and model responses. For deployed model traffic, put
+the V2 gateway or an organization-approved equivalent in front of the model;
+the pre-deployment report alone cannot enforce a running tool call.
+
+## 6.7 Runtime monitoring and blocking gateway (Argus V2)
 
 The pre-deployment scanner answers “should this agent be released?” The V2 runtime gateway answers “should this request or response pass right now?”
 
@@ -612,7 +774,9 @@ These are explicit operational boundaries, not hidden assumptions. The repositor
 
 ```python
 config = load_config(profile=args.profile, config_path=args.config)
+config = _apply_target_options(config, args)
 context = ingest(args.target, max_file_size=config.engine.max_file_size_bytes)
+context = context.model_copy(update={"target_endpoint": args.endpoint or config.target_endpoint})
 results = asyncio.run(ArgusEngine(config).run(context))
 _write_reports(results, config, args.output)
 return _exit_for_results(results, fail_on)
@@ -634,6 +798,10 @@ Supported environment overrides are:
 
 ```text
 ARGUS_TARGET_ENDPOINT
+ARGUS_TARGET_PROVIDER
+ARGUS_TARGET_MODEL
+ARGUS_TARGET_API_KEY_ENV
+ARGUS_TARGET_AUTH_HEADER
 ARGUS_JUDGE_BACKEND
 ARGUS_FAIL_ON
 ```
@@ -657,6 +825,10 @@ reporting:
   formats: [json, markdown]
   fail_on: HIGH
 attacks: [prompt_injection, jailbreak, data_extraction]
+target:
+  provider: generic
+  max_tokens: 512
+  temperature: 0.0
 ```
 
 Important configuration knobs:
@@ -671,11 +843,16 @@ Important configuration knobs:
 | `reporting.fail_on` | Default CI severity gate | Use `HIGH` for a strict deployment gate |
 | `judge.backend` | Null, mock, or HTTP judge selection | Keep `NullJudgeBackend` for deterministic private scans |
 | `judge.endpoint` | Optional semantic-judge URL | Required when using `HTTPJudgeBackend` |
+| `target.provider` | `generic`, `openai`, `anthropic`, or `ollama` request format | Select the actual endpoint contract; OpenAI also covers compatible gateways |
+| `target.model` | Model identifier sent to the live target | Set it explicitly; live adapters fail if a provider requires one and it is missing |
+| `target.api_key_env` | Environment variable name, not the key | Keep the secret in CI/OS secret management |
+| `target.header_env` | Additional header-to-environment mappings | Use for internal gateway tenant headers without committing values |
+| `target.max_tokens` / `temperature` | Bounds and reproducibility for probes | Keep temperature at `0.0` so comparisons are easier |
 | `scanners` / `attacks` | Default module lists | Choose which built-ins are in scope |
 | `enabled_modules` | Explicit module allowlist by group | Use when a pipeline needs a small fixed scope |
 | `disabled_modules` | Module exclusions | Use sparingly; record the reason in review |
 
-`ARGUS_JUDGE_BACKEND` changes the backend name, but an HTTP judge still needs `judge.endpoint`. `api_key_env` tells the judge where to read its API key; the key itself should stay outside source control.
+`ARGUS_JUDGE_BACKEND` changes the backend name, but an HTTP judge still needs `judge.endpoint`. `api_key_env` tells the judge where to read its API key; the key itself should stay outside source control. Target credentials use the same principle: the report records an environment-variable name, never the value.
 
 ### Step 3: Safe ingestion
 
@@ -718,7 +895,7 @@ Malformed structured documents are retained with `parse_error` and reported in t
 
 `MCPScanner` is the built-in scanner. It is registered through `src/core/registry.py` and returns validated `Finding` models.
 
-The 15 canonical rules are:
+The 27 canonical rules are:
 
 | ID | Check | Severity |
 | --- | --- | --- |
@@ -737,6 +914,18 @@ The 15 canonical rules are:
 | `ARGUS_ST_013` | Remote MCP server lacks verification metadata | HIGH |
 | `ARGUS_ST_014` | Known agent framework is old or unpinned | MEDIUM |
 | `ARGUS_ST_015` | Non-local HTTP endpoint instead of HTTPS | MEDIUM |
+| `ARGUS_ST_016` | Wildcard, all-resource, root, admin, or sudo-style MCP permission | CRITICAL |
+| `ARGUS_ST_017` | High-impact MCP tool without approval | HIGH |
+| `ARGUS_ST_018` | Unrestricted MCP network egress | HIGH |
+| `ARGUS_ST_019` | Unpinned `npx`, `uvx`, or `pipx` MCP package command | HIGH |
+| `ARGUS_ST_020` | MCP service bound to `0.0.0.0` or another public interface | HIGH |
+| `ARGUS_ST_021` | Disabled TLS certificate verification | HIGH |
+| `ARGUS_ST_022` | Skill attempts to override system/developer authority or hide actions | HIGH |
+| `ARGUS_ST_023` | Skill contains arbitrary shell, destructive filesystem, or untrusted code execution | CRITICAL |
+| `ARGUS_ST_024` | Skill requests secrets or the entire process environment | CRITICAL |
+| `ARGUS_ST_025` | Skill installs or clones unpinned remote code | HIGH |
+| `ARGUS_ST_026` | Skill sends local/user data to an external destination | HIGH |
+| `ARGUS_ST_027` | Skill has no verifiable provenance/integrity metadata | MEDIUM |
 
 Each finding contains:
 
@@ -777,7 +966,7 @@ subprocess.run(value)
 pickle.loads(value)
 ```
 
-Together with a `.env` file and an old framework dependency, this fixture exercises all 15 static rules. It is a good interview demo because every finding can be traced back to a small, understandable code or configuration decision.
+Together with a `.env` file and an old framework dependency, this fixture exercises the original 15 static rules. The MCP-specific fixture in `tests/unit/test_target_client_and_mcp.py` exercises the least-privilege checks. Each finding can be traced back to a small, understandable code or configuration decision.
 
 ### Step 6: Dynamic attack modules
 
@@ -1087,7 +1276,8 @@ Test ownership by file:
 
 | Test file | What it protects |
 | --- | --- |
-| `test_ingress_and_scanner.py` | Safe ingestion and all 15 static rules |
+| `test_ingress_and_scanner.py` | Safe ingestion and the original 15 static rules |
+| `test_target_client_and_mcp.py` | Provider request contracts and MCP least-privilege findings |
 | `test_documents_and_capabilities.py` | Parser behavior and rule routing |
 | `test_dynamic_engine.py` | Injected target and canonical dynamic results |
 | `test_dynamic_resilience.py` | Bounded retry behavior for server failures |
@@ -1239,12 +1429,12 @@ Current limits:
 
 - static rules cover the defined patterns, not every framework or programming language;
 - dynamic tests use a small versioned payload set rather than a complete red-team corpus;
-- endpoint authentication headers are not exposed as CLI options;
+- the live target adapters cover generic, OpenAI-compatible, Anthropic, and Ollama HTTP contracts; truly custom protocols still need an adapter;
 - the normal report intentionally omits raw model responses;
 - the V2 gateway can enforce the defined policies on traffic routed through it, but it does not automatically observe traffic that bypasses the gateway;
 - the gateway includes shared-token authentication and a Compose/Caddy replica topology, but not OIDC/mTLS, distributed coordination, dashboard/SIEM product integration, or multi-region failover;
 - remote audit shipping is retrying best-effort; local per-replica files remain necessary until the collector confirms durable acceptance;
-- provider-specific request translation is not included; the upstream must already accept the client's JSON shape and the gateway only understands common tool-call shapes;
+- Argus statically inspects MCP definitions in the repository but does not speak every MCP transport to enumerate tools from a remote server;
 - token-by-token streaming is not supported; responses are buffered for inspection;
 - the default semantic judge is disabled.
 
@@ -1275,7 +1465,7 @@ A strong portfolio project is not one that claims to solve everything. It is one
 | CLI workflow | `argus.py scan` with profiles, output, endpoint, threshold, and verbose mode | `argus.py` |
 | Safe source ingestion | Local files and shallow Git with size, path, symlink, binary, and encoding checks | `src/core/ingress.py`, ingress tests |
 | Structured analysis | JSON/YAML/TOML parsing plus Python AST analysis | `src/core/documents.py`, capability tests |
-| Security rules | 15 deterministic static rules with evidence and remediation | `src/modules/scanners/mcp_scanner.py` |
+| Security rules | 27 deterministic agent/MCP/skill static rules with evidence and remediation | `src/modules/scanners/mcp_scanner.py` |
 | Dynamic probing | Three attack families with three versioned payloads each | `src/modules/attacks/`, dataset tests |
 | Resilience | Concurrency bound, rate limiter, timeout, retry, backoff, and `Retry-After` parsing | `src/core/engine.py`, `src/core/rate_limiter.py`, resilience tests |
 | Output contracts | Pydantic models, strict fields, generated JSON Schemas, JSON and Markdown exporters | `src/models/`, `src/reporting/` |
@@ -1429,7 +1619,7 @@ Use this structure when presenting Argus:
 
 ### Solution
 
-"I built Argus as a two-layer security toolkit. V1 safely ingests a repository, parses each file using the right representation, runs 15 deterministic security rules, optionally probes an authorized endpoint, sanitizes untrusted output, computes contextual risk, and returns a CI-friendly exit code. V2 places a provider-neutral gateway in front of a live placement assistant to block risky prompts/tools, require approval for high-impact actions, redact sensitive output, and emit tamper-evident audit events."
+"I built Argus as a two-layer security toolkit. V1 safely ingests a repository, parses each file using the right representation, runs 27 deterministic agent, MCP, and skill security rules, optionally probes an authorized endpoint through provider adapters, sanitizes untrusted output, computes contextual risk, and returns a CI-friendly exit code. V2 places a provider-neutral gateway in front of a live placement assistant to block risky prompts/tools, require approval for high-impact actions, redact sensitive output, and emit tamper-evident audit events."
 
 ### Architecture
 

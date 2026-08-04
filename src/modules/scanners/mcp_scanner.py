@@ -1,4 +1,4 @@
-"""Deterministic implementation of Argus' 15 canonical static rules."""
+"""Deterministic static checks for agent and MCP server repositories."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import ast
 import json
 import re
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlparse
 
 from src.core.registry import register_scanner
 from src.core.documents import parse_file
@@ -121,6 +123,92 @@ _RULES: dict[str, tuple[Severity, str, str, float, str]] = {
         5.0,
         "Use HTTPS with certificate validation; allow HTTP only for explicit localhost test fixtures.",  # noqa: E501
     ),
+    "ARGUS_ST_016": (
+        Severity.CRITICAL,
+        "Wildcard or administrative MCP permission",
+        "An MCP server or tool grants a wildcard, all-resource, root, admin, or sudo-style permission.",  # noqa: E501
+        9.0,
+        "Replace broad permissions with the smallest named files, resources, commands, and scopes required.",  # noqa: E501
+    ),
+    "ARGUS_ST_017": (
+        Severity.HIGH,
+        "High-impact MCP tool without approval",
+        "A tool can send, change, export, grant, or execute a high-impact action without an "
+        "explicit approval checkpoint.",
+        8.5,
+        "Add human approval immediately before the side effect and validate the tool arguments against a strict schema.",  # noqa: E501
+    ),
+    "ARGUS_ST_018": (
+        Severity.HIGH,
+        "Unrestricted MCP network egress",
+        "An MCP server or tool can reach every host, domain, URL, or network destination.",
+        8.0,
+        "Use an outbound allowlist of named domains or service identities and deny everything "
+        "else.",
+    ),
+    "ARGUS_ST_019": (
+        Severity.HIGH,
+        "Unpinned MCP package command",
+        "An MCP server is launched through a package runner without a version or immutable reference.",  # noqa: E501
+        7.0,
+        "Pin the package version or digest and verify it through the deployment lockfile or artifact registry.",  # noqa: E501
+    ),
+    "ARGUS_ST_020": (
+        Severity.HIGH,
+        "MCP service bound publicly",
+        "A configured MCP service binds to every network interface, which can expose an administrative or tool endpoint.",  # noqa: E501
+        7.5,
+        "Bind to a private interface and place public access behind authenticated TLS and an explicit gateway.",  # noqa: E501
+    ),
+    "ARGUS_ST_021": (
+        Severity.HIGH,
+        "TLS certificate verification disabled",
+        "The MCP or model connection disables certificate verification, enabling interception of prompts or tool data.",  # noqa: E501
+        8.0,
+        "Keep certificate verification enabled and install the correct private CA instead of bypassing TLS checks.",  # noqa: E501
+    ),
+    "ARGUS_ST_022": (
+        Severity.HIGH,
+        "Skill attempts to override agent authority",
+        "A skill contains instructions that try to supersede system policy, hide actions, or disable safety controls.",  # noqa: E501
+        8.0,
+        "Treat the skill as untrusted input, remove authority-override language, and review it before enabling the skill.",  # noqa: E501
+    ),
+    "ARGUS_ST_023": (
+        Severity.CRITICAL,
+        "Skill contains dangerous command execution",
+        "A skill instructs an agent to run arbitrary shell commands, destructive filesystem actions, or untrusted code.",  # noqa: E501
+        9.5,
+        "Use a narrow allowlist of fixed operations, sandbox execution, and approval for any destructive command.",  # noqa: E501
+    ),
+    "ARGUS_ST_024": (
+        Severity.CRITICAL,
+        "Skill requests secrets or broad environment access",
+        "A skill asks the agent to read credentials, private keys, dotenv files, or the entire process environment.",  # noqa: E501
+        9.0,
+        "Inject only the named secret into an isolated process and never place credentials in prompts or tool output.",  # noqa: E501
+    ),
+    "ARGUS_ST_025": (
+        Severity.HIGH,
+        "Skill installs unpinned remote code",
+        "A skill downloads or installs dependencies without an immutable version, checksum, or trusted artifact boundary.",  # noqa: E501
+        7.5,
+        "Pin dependencies, verify checksums/signatures, and install only through a reviewed build or policy service.",  # noqa: E501
+    ),
+    "ARGUS_ST_026": (
+        Severity.HIGH,
+        "Skill sends data to an external destination",
+        "A skill directs the agent to upload, POST, or transmit local or user data to an external endpoint.",  # noqa: E501
+        8.0,
+        "Allowlist the destination, minimize the data, require consent for sensitive transfers, and log the action.",  # noqa: E501
+    ),
+    "ARGUS_ST_027": (
+        Severity.MEDIUM,
+        "Skill provenance is not verifiable",
+        "A discovered skill has no adjacent origin, integrity, or verification metadata that ties it to a reviewed source.",  # noqa: E501
+        5.0,
+        "Verify the skill with the source registry or a signed internal artifact, record its version/digest, and review updates before enabling it.",  # noqa: E501
+    ),
 }
 
 _SECRET_RE = re.compile(
@@ -135,6 +223,78 @@ _TRUST_RE = re.compile(
     r"(?i)\b(trust|assume|treat)\b.{0,50}\b(untrusted|external|user|input)\b|ignore\s+(?:all\s+)?validation"  # noqa: E501
 )
 _REMOTE_RE = re.compile(r"\bhttps?://[^\s'\"]+")
+_BROAD_PERMISSION_VALUES = {"*", "all", "full", "admin", "root", "sudo", "/**", "/*"}
+_BROAD_SCOPE_KEYS = {
+    "access",
+    "allowed_domains",
+    "allowed_hosts",
+    "allowed_urls",
+    "filesystem",
+    "elevated",
+    "profile",
+    "permissions",
+    "resources",
+    "scope",
+    "scopes",
+}
+_NETWORK_SCOPE_KEYS = {
+    "allowed_domains",
+    "allowed_hosts",
+    "allowed_urls",
+    "egress",
+    "network",
+    "networks",
+}
+_HIGH_IMPACT_RE = re.compile(
+    r"(?i)\b(send[_ -]?email|issue[_ -]?offer|update[_ -]?student|export(?:\s+all)?|"
+    r"grant|revoke|invite|write[_ -]?file|execute[_ -]?command|shell|run[_ -]?command)\b"
+)
+_PACKAGE_RUNNERS = {"npx", "uvx", "pipx"}
+_SKILL_AUTHORITY_RE = re.compile(
+    r"(?i)(?:ignore|disregard|override).{0,60}(?:system|developer|previous|safety|policy)|"
+    r"(?:disable|bypass).{0,40}(?:approval|sandbox|safety)|"
+    r"do not (?:tell|show|ask) the user"
+)
+_SKILL_COMMAND_RE = re.compile(
+    r"(?im)(?:curl|wget)[^\n]{0,160}\|\s*(?:sh|bash)|"
+    r"\brm\s+-rf\s+/|\bsudo\b|\beval\s*\(|"
+    r"\b(?:run|execute)\s+(?:any|arbitrary|untrusted)\s+(?:shell\s+)?commands?"
+)
+_SKILL_SECRET_RE = re.compile(
+    r"(?i)(?:read|print|dump|send|upload|include).{0,80}(?:all|every|entire).{0,40}"
+    r"(?:environment|env|secrets?|credentials?)|(?:\.env|~?/.ssh|private[_ -]?key|"
+    r"api[_ -]?key).{0,100}"
+    r"(?:send|upload|include|print|dump)|(?:send|upload|include).{0,100}"
+    r"(?:\.env|~?/.ssh|private[_ -]?key|api[_ -]?key|local files?)"
+)
+_SKILL_INSTALL_RE = re.compile(
+    r"(?i)\b(?:pip3?|uv)\s+install\s+[A-Za-z0-9_.-]+(?!\s*(?:==|>=|<=|~=|@))|"
+    r"\bnpm\s+install\s+@[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?!@[0-9])|"
+    r"\bgit\s+clone\s+https?://[^\s]+(?:\s+--branch\s+main)?"
+)
+_SKILL_EXFIL_RE = re.compile(
+    r"(?i)(?:\bcurl\b|\bwget\b|\b(?:http|https)\s*(?:post|upload)|\bwebhook\b).{0,120}"
+    r"(?:send|post|upload|transmit|local files?|user data|conversation|secrets?)|"
+    r"(?:send|post|upload|transmit).{0,120}"
+    r"(?:local files?|user data|conversation|secrets?|\.env|~?/.ssh)"
+)
+
+
+def _is_skill_path(path: str) -> bool:
+    lowered = path.lower()
+    return lowered.endswith(("/skill.md", "/skills.md", "skill.md", "skills.md"))
+
+
+def _skill_has_provenance(context: ScanContext, path: str) -> bool:
+    skill_directory = str(Path(path).parent).replace("\\", "/")
+    return any(
+        candidate.startswith(skill_directory + "/.clawhub/")
+        and candidate.lower().endswith("origin.json")
+        and re.search(r"(?i)integrity|sha256|signature|version", record.content)
+        for candidate, record in context.files.items()
+    )
+
+
 _FRAMEWORK_RE = re.compile(
     r"(?i)\b(langchain|langgraph|autogen|crewai|semantic-kernel)\b(?:\s*[<>=!~]+\s*([0-9][^\s,;]*))?"  # noqa: E501
 )
@@ -166,6 +326,131 @@ class MCPScanner(BaseStaticScanner):
     @classmethod
     def _supports(cls, rule_id: str, path: str, document: ParsedDocument | None) -> bool:
         return cls.rule_capabilities[rule_id].supports(path, document)  # type: ignore[union-attr]
+
+    @staticmethod
+    def inventory(context: ScanContext) -> dict[str, list[dict[str, Any]]]:
+        """Return a safe inventory of declared MCP servers and tools.
+
+        Inventory is intentionally metadata-only: it excludes environment
+        values, tool descriptions, URLs with query strings, and raw arguments.
+        Findings remain the authoritative security decisions.
+        """
+
+        servers: list[dict[str, Any]] = []
+        tools: list[dict[str, Any]] = []
+        skills: list[dict[str, Any]] = []
+        for record in context.iter_files():
+            if _is_skill_path(record.path):
+                name_match = re.search(r"(?im)^name\s*:\s*([^\n#]+)", record.content)
+                skills.append(
+                    {
+                        "name": (
+                            name_match.group(1).strip().strip("'\"")
+                            if name_match
+                            else Path(record.path).parent.name
+                        ),
+                        "file": record.path,
+                        "provenance": (
+                            "verified_metadata"
+                            if _skill_has_provenance(context, record.path)
+                            else "review_required"
+                        ),
+                    }
+                )
+            document = context.documents.get(record.path)
+            if not isinstance(document, ParsedDocument):
+                document = parse_file(record)
+            if not isinstance(document, ParsedDocument) or document.kind not in {
+                DocumentKind.JSON,
+                DocumentKind.YAML,
+                DocumentKind.TOML,
+            }:
+                continue
+            value = document.value
+            if not isinstance(value, dict):
+                continue
+            server_maps: list[dict[str, Any]] = []
+
+            def collect_server_maps(node: Any, location: str = "") -> None:
+                if not isinstance(node, dict):
+                    return
+                for key, child in node.items():
+                    normalized_key = key.lower().replace("-", "_")
+                    child_location = f"{location}.{normalized_key}" if location else normalized_key
+                    if (
+                        isinstance(child, dict) and normalized_key in {"mcpservers", "mcp_servers"}
+                    ) or (
+                        isinstance(child, dict)
+                        and normalized_key == "servers"
+                        and location.lower().endswith("mcp")
+                    ):
+                        server_maps.append(child)
+                    else:
+                        collect_server_maps(child, child_location)
+
+            collect_server_maps(value)
+            for server_map in server_maps:
+                for name, settings in server_map.items():
+                    if not isinstance(settings, dict):
+                        continue
+                    endpoint = settings.get("url", settings.get("endpoint"))
+                    servers.append(
+                        {
+                            "name": str(name),
+                            "file": record.path,
+                            "transport": "http" if endpoint else "stdio",
+                            "command": (
+                                Path(str(settings.get("command"))).name
+                                if settings.get("command")
+                                else None
+                            ),
+                            "host": urlparse(str(endpoint)).hostname if endpoint else None,
+                            "verified": bool(
+                                settings.get("signature")
+                                or settings.get("checksum")
+                                or settings.get("sha256")
+                                or settings.get("verified") is True
+                            ),
+                        }
+                    )
+
+            def collect_tools(node: Any, location: str = "") -> None:
+                if isinstance(node, dict):
+                    lowered_location = location.lower()
+                    if ("tool" in lowered_location or "mcp" in lowered_location) and node.get(
+                        "name"
+                    ):
+                        approval = any(
+                            key.lower().replace("-", "_")
+                            in {
+                                "require_approval",
+                                "approval",
+                                "approval_required",
+                                "human_approval",
+                            }
+                            and bool(child)
+                            for key, child in node.items()
+                        )
+                        tools.append(
+                            {
+                                "name": str(node["name"]),
+                                "file": record.path,
+                                "approval_required": approval,
+                            }
+                        )
+                    for key, child in node.items():
+                        child_location = f"{location}.{key}" if location else str(key)
+                        collect_tools(child, child_location)
+                elif isinstance(node, list):
+                    for index, child in enumerate(node):
+                        collect_tools(child, f"{location}[{index}]")
+
+            collect_tools(value)
+        return {
+            "mcp_servers": sorted(servers, key=lambda item: (item["file"], item["name"])),
+            "mcp_tools": sorted(tools, key=lambda item: (item["file"], item["name"])),
+            "skills": sorted(skills, key=lambda item: (item["file"], item["name"])),
+        }
 
     def scan(self, context: ScanContext) -> list[Finding]:
         findings: list[Finding] = []
@@ -289,13 +574,22 @@ class MCPScanner(BaseStaticScanner):
                 and not path.lower().endswith((".example", ".sample"))
             ):
                 secret_match = _SECRET_RE.search(content)
-                if secret_match and secret_match.group(1) not in {
-                    "${SECRET}",
-                    "${API_KEY}",
-                    "changeme",
-                    "change-me",
-                    "your-secret",
-                }:
+                if (
+                    secret_match
+                    and not re.search(r"(?i)(?:[_-]env|environment)\s*[:=]", secret_match.group(0))
+                    and not (
+                        re.fullmatch(r"[A-Z][A-Z0-9_]+", secret_match.group(1))
+                        and "_" in secret_match.group(1)
+                    )
+                    and secret_match.group(1)
+                    not in {
+                        "${SECRET}",
+                        "${API_KEY}",
+                        "changeme",
+                        "change-me",
+                        "your-secret",
+                    }
+                ):
                     add(
                         "ARGUS_ST_010",
                         path,
@@ -349,6 +643,35 @@ class MCPScanner(BaseStaticScanner):
                         {"framework": match.group(1), "version": version},
                         _line_for(content, match.group(1)),
                     )
+            if _is_skill_path(path):
+                skill_checks = (
+                    ("ARGUS_ST_022", _SKILL_AUTHORITY_RE, "authority override"),
+                    ("ARGUS_ST_023", _SKILL_COMMAND_RE, "dangerous command"),
+                    ("ARGUS_ST_024", _SKILL_SECRET_RE, "secret or broad environment access"),
+                    ("ARGUS_ST_025", _SKILL_INSTALL_RE, "unpinned install or clone"),
+                    ("ARGUS_ST_026", _SKILL_EXFIL_RE, "external data transfer"),
+                )
+                for rule_id, pattern, match_name in skill_checks:
+                    if self._supports(rule_id, path, parsed_document):
+                        skill_match = pattern.search(content)
+                        if skill_match:
+                            add(
+                                rule_id,
+                                path,
+                                {"match": match_name, "text": skill_match.group(0)[:160]},
+                                _line_for(content, skill_match.group(0)),
+                            )
+                if (
+                    self._supports("ARGUS_ST_027", path, parsed_document)
+                    and not _skill_has_provenance(context, path)
+                    and not re.search(r"(?i)\b(?:verified|integrity|sha256|signature)\b", content)
+                ):
+                    add(
+                        "ARGUS_ST_027",
+                        path,
+                        {"match": "missing skill provenance metadata"},
+                        1,
+                    )
 
         # Schema-aware rules operate on parsed JSON/YAML documents.
         dependency_graph: dict[str, set[str]] = defaultdict(set)
@@ -401,6 +724,12 @@ class MCPScanner(BaseStaticScanner):
                         )
                         or _SECRET_VALUE_RE.search(value) is not None
                     )
+                    and not key_name.endswith("env")
+                    and not (
+                        key_name.replace("_", "") in {"apikey", "token"}
+                        and re.fullmatch(r"[A-Z][A-Z0-9_]+", value)
+                        and "_" in value
+                    )
                     and value
                     not in {"${SECRET}", "${API_KEY}", "changeme", "change-me", "your-secret"}
                     and len(value) >= 8
@@ -449,12 +778,163 @@ class MCPScanner(BaseStaticScanner):
                     description = str(value.get("description", ""))
                     combined = f"{name} {description} {json.dumps(value, default=str)}"
                     for key, child in value.items():
-                        if key.lower().replace("-", "_") in {"pass_env", "environment"}:
+                        if key.lower().replace("-", "_") in {
+                            "pass_env",
+                            "environment",
+                            "env",
+                        }:
                             if child == "*" or (isinstance(child, list) and "*" in child):
                                 add(  # noqa: E501
                                     "ARGUS_ST_011",
                                     path,
                                     {"match": "all environment variables"},
+                                    _line_for(raw, key),
+                                )
+                            if isinstance(child, dict) and "*" in child:
+                                add(
+                                    "ARGUS_ST_011",
+                                    path,
+                                    {"match": "all environment variables"},
+                                    _line_for(raw, key),
+                                )
+                    if self._supports("ARGUS_ST_016", path, parsed_document):
+                        for key, child in value.items():
+                            normalized_key = key.lower().replace("-", "_")
+                            if normalized_key not in _BROAD_SCOPE_KEYS:
+                                continue
+                            candidates = child if isinstance(child, list) else [child]
+                            broad = next(
+                                (
+                                    candidate
+                                    for candidate in candidates
+                                    if isinstance(candidate, str)
+                                    and candidate.lower() in _BROAD_PERMISSION_VALUES
+                                ),
+                                None,
+                            )
+                            if broad is not None:
+                                add(
+                                    "ARGUS_ST_016",
+                                    path,
+                                    {"key_path": location + "." + key, "permission": broad},
+                                    _line_for(raw, key),
+                                )
+                            if (
+                                normalized_key == "elevated"
+                                and isinstance(child, dict)
+                                and child.get("enabled") is True
+                            ):
+                                add(
+                                    "ARGUS_ST_016",
+                                    path,
+                                    {"key_path": location + "." + key, "permission": "elevated"},
+                                    _line_for(raw, key),
+                                )
+                    if self._supports("ARGUS_ST_017", path, parsed_document):
+                        is_tool = (
+                            any(
+                                key.lower().replace("-", "_")
+                                in {"name", "tool", "tool_name", "input_schema", "inputschema"}
+                                for key in value
+                            )
+                            or ".tools" in location.lower()
+                        )
+                        approval = any(
+                            key.lower().replace("-", "_")
+                            in {
+                                "require_approval",
+                                "approval",
+                                "approval_required",
+                                "human_approval",
+                            }
+                            and bool(child)
+                            for key, child in value.items()
+                        )
+                        if is_tool and not approval and _HIGH_IMPACT_RE.search(combined):
+                            impact_match = _HIGH_IMPACT_RE.search(combined)
+                            add(
+                                "ARGUS_ST_017",
+                                path,
+                                {
+                                    "tool": name,
+                                    "operation": (
+                                        impact_match.group(0)
+                                        if impact_match
+                                        else "high-impact action"
+                                    ),
+                                },
+                                _line_for(raw, name),
+                            )
+                    if self._supports("ARGUS_ST_018", path, parsed_document):
+                        for key, child in value.items():
+                            normalized_key = key.lower().replace("-", "_")
+                            if normalized_key not in _NETWORK_SCOPE_KEYS:
+                                continue
+                            candidates = child if isinstance(child, list) else [child]
+                            broad = next(
+                                (
+                                    candidate
+                                    for candidate in candidates
+                                    if isinstance(candidate, str)
+                                    and candidate.lower() in _BROAD_PERMISSION_VALUES
+                                ),
+                                None,
+                            )
+                            if broad is not None:
+                                add(
+                                    "ARGUS_ST_018",
+                                    path,
+                                    {"key_path": location + "." + key, "destination": broad},
+                                    _line_for(raw, key),
+                                )
+                    if self._supports("ARGUS_ST_019", path, parsed_document):
+                        command = value.get("command")
+                        arguments = value.get("args", value.get("arguments", []))
+                        command_name = Path(str(command)).name if command else ""
+                        argument_text = (
+                            " ".join(str(item) for item in arguments)
+                            if isinstance(arguments, list)
+                            else str(arguments)
+                        )
+                        package_is_pinned = re.search(
+                            r"(?:@[0-9]+\.[0-9]+(?:\.[0-9]+)?|@[A-Za-z0-9_.-]+@[0-9]"
+                            r"|==[0-9]|#[0-9a-f]{7,}|sha256[:=][0-9a-f]{12,})",
+                            argument_text,
+                        )
+                        if command_name in _PACKAGE_RUNNERS and not package_is_pinned:
+                            add(
+                                "ARGUS_ST_019",
+                                path,
+                                {"command": command_name, "arguments": argument_text[:240]},
+                                _line_for(raw, str(command)),
+                            )
+                    if self._supports("ARGUS_ST_020", path, parsed_document):
+                        for key in ("host", "bind", "bind_host", "listen", "address"):
+                            candidate = value.get(key)
+                            if candidate in {"0.0.0.0", "::", "[::]"}:
+                                add(
+                                    "ARGUS_ST_020",
+                                    path,
+                                    {"key_path": location + "." + key, "address": candidate},
+                                    _line_for(raw, key),
+                                )
+                    if self._supports("ARGUS_ST_021", path, parsed_document):
+                        for key, child in value.items():
+                            normalized_key = key.lower().replace("-", "_")
+                            if (
+                                normalized_key
+                                in {
+                                    "verify_ssl",
+                                    "ssl_verify",
+                                    "tls_verify",
+                                    "reject_unauthorized",
+                                }
+                                and child is False
+                            ):
+                                add(
+                                    "ARGUS_ST_021",
+                                    path,
+                                    {"key_path": location + "." + key, "value": False},
                                     _line_for(raw, key),
                                 )
                     destructive_match = _DESTRUCTIVE_RE.search(combined)  # noqa: E501

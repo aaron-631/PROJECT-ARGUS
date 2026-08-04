@@ -22,6 +22,13 @@ vault:
   enabled: true
   vault_dir: ".vault"
 
+# Dynamic testing is opt-in. Select a provider with CLI flags or the
+# ARGUS_TARGET_* environment variables; API keys are read only from env.
+target:
+  provider: generic
+  max_tokens: 512
+  temperature: 0.0
+
 scanners: ["mcp_scanner"]
 attacks: ["prompt_injection", "jailbreak", "data_extraction"]
 dataset_version: "1.0.0"

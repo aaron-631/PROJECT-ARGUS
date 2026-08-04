@@ -71,11 +71,14 @@ class MarkdownExporter(BaseExporter):
             f"- Profile: `{report.metadata.profile}`",
             f"- Scan ID: `{report.metadata.scan_id}`",
             f"- Evaluation methodology: `{report.evaluation_methodology}`",
+            f"- Decision: **{report.summary.get('decision', 'UNKNOWN')}** "
+            f"(fail on `{report.summary.get('fail_on', 'HIGH')}`)",
             "",
             "## Summary",
             "",
             f"Findings: **{len(report.findings)}**  ",
             f"Dynamic attack results: **{len(report.attack_results)}**  ",
+            f"Dynamic transport errors: **{report.summary.get('dynamic_error_count', 0)}**  ",
             f"Maximum risk: **{report.summary.get('max_risk', 0)} / 10**",
             "",
             "## Static findings",
@@ -115,6 +118,43 @@ class MarkdownExporter(BaseExporter):
                     "",
                 ]
             )
+        servers = report.summary.get("mcp_servers", [])
+        tools = report.summary.get("mcp_tools", [])
+        skills = report.summary.get("skills", [])
+        lines.extend(["## MCP inventory", ""])
+        lines.append(f"Declared MCP servers: **{len(servers)}**  ")
+        lines.append(f"Declared MCP tools: **{len(tools)}**")
+        if servers:
+            lines.extend(["", "### Servers", ""])
+            for server in servers:
+                transport = server.get("transport", "unknown")
+                identity = server.get("command") or server.get("host") or "unknown"
+                verified = "verified" if server.get("verified") else "unverified"
+                lines.append(
+                    f"- `{server.get('name', 'unknown')}` ({transport}, {identity}, {verified}) "
+                    f"from `{server.get('file', 'unknown')}`"
+                )
+        if tools:
+            lines.extend(["", "### Tools", ""])
+            for tool in tools:
+                approval = (
+                    "approval configured"
+                    if tool.get("approval_required")
+                    else "no approval metadata"
+                )
+                lines.append(
+                    f"- `{tool.get('name', 'unknown')}` ({approval}) "
+                    f"from `{tool.get('file', 'unknown')}`"
+                )
+        lines.extend(["", "## Skill inventory", ""])
+        lines.append(f"Discovered skills: **{len(skills)}**")
+        for skill in skills:
+            lines.append(
+                f"- `{skill.get('name', 'unknown')}` "
+                f"({skill.get('provenance', 'review_required')}) "
+                f"from `{skill.get('file', 'unknown')}`"
+            )
+        lines.append("")
         if report.summary.get("errors"):
             lines.extend(
                 [

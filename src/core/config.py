@@ -68,6 +68,15 @@ def load_config(
     env = environ if environ is not None else os.environ
     if env.get("ARGUS_TARGET_ENDPOINT"):
         merged["target_endpoint"] = env["ARGUS_TARGET_ENDPOINT"]
+    target_env_map = {
+        "ARGUS_TARGET_PROVIDER": "provider",
+        "ARGUS_TARGET_MODEL": "model",
+        "ARGUS_TARGET_API_KEY_ENV": "api_key_env",
+        "ARGUS_TARGET_AUTH_HEADER": "auth_header",
+    }
+    for environment_name, target_key in target_env_map.items():
+        if env.get(environment_name):
+            merged.setdefault("target", {})[target_key] = env[environment_name]
     if env.get("ARGUS_JUDGE_BACKEND"):
         merged.setdefault("judge", {})["backend"] = env["ARGUS_JUDGE_BACKEND"]
     if env.get("ARGUS_FAIL_ON"):

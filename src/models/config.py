@@ -28,6 +28,23 @@ class JudgeConfig(ConfigModel):
     headers: dict[str, str] = Field(default_factory=dict)
 
 
+class TargetConfig(ConfigModel):
+    """How Argus formats and authenticates authorized live probes.
+
+    The API key itself is never part of this model.  ``api_key_env`` names the
+    environment variable from which the process may read it at runtime.
+    """
+
+    provider: Literal["generic", "openai", "anthropic", "ollama"] = "generic"
+    model: str | None = None
+    api_key_env: str | None = None
+    auth_header: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+    header_env: dict[str, str] = Field(default_factory=dict)
+    max_tokens: int = Field(default=512, ge=1, le=100_000)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+
+
 class ReportingConfig(ConfigModel):
     formats: list[str] = Field(default_factory=lambda: ["json", "markdown"])
     output_dir: str = "./reports"
@@ -60,6 +77,7 @@ class ArgusConfig(ConfigModel):
     judge: JudgeConfig = Field(default_factory=JudgeConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
     vault: VaultConfig = Field(default_factory=VaultConfig)
+    target: TargetConfig = Field(default_factory=TargetConfig)
     scanners: list[str] = Field(default_factory=lambda: ["mcp_scanner"])
     attacks: list[str] = Field(
         default_factory=lambda: ["prompt_injection", "jailbreak", "data_extraction"]
@@ -73,4 +91,11 @@ class ArgusConfig(ConfigModel):
         return self.model_dump(mode="json")
 
 
-__all__ = ["ArgusConfig", "EngineConfig", "JudgeConfig", "ReportingConfig", "VaultConfig"]
+__all__ = [
+    "ArgusConfig",
+    "EngineConfig",
+    "JudgeConfig",
+    "ReportingConfig",
+    "TargetConfig",
+    "VaultConfig",
+]

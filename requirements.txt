@@ -9,6 +9,7 @@ cryptography>=42.0.0
 
 # Config
 pyyaml>=6.0.1
+json5>=0.9.25
 
 # CLI
 click>=8.1.7

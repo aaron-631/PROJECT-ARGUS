@@ -48,6 +48,7 @@ def _language(path: str) -> str | None:
     suffix = Path(path).suffix.lower()
     return {
         ".json": "json",
+        ".json5": "json",
         ".yaml": "yaml",
         ".yml": "yaml",
         ".py": "python",

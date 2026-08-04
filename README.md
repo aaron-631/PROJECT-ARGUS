@@ -13,28 +13,81 @@ agent traffic ─> runtime gateway ─> model endpoint
 
 The scanner and gateway are separate on purpose: the scanner decides whether a release is acceptable; the gateway blocks or redacts traffic for a running placement assistant. Argus is not an IAM system, dashboard, SIEM, sandbox, or guarantee of safety.
 
-## Run it
+## Run it against a real agent repository
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# Scan local files only. No network endpoint is contacted.
-.venv/bin/python argus.py scan --target ./config --output ./reports
+# Audit any local agent/LLM repository. This contacts no model endpoint.
+.venv/bin/python argus.py audit \
+  --target /path/to/your-agent-repository \
+  --output ./reports/agent
 ```
+
+`audit` and `scan` are aliases. Argus reads source, dependency/configuration
+files, MCP server definitions, and tool schemas. It reports hardcoded secrets,
+unsafe code execution, wildcard filesystem or administrative permissions,
+unrestricted network egress, unapproved high-impact tools, unpinned MCP
+servers, unsafe TLS settings, and model-behavior results when a live endpoint
+is explicitly supplied. It does not execute the target repository.
 
 Use a deployment profile when the same finding should carry different business impact:
 
 ```bash
-.venv/bin/python argus.py scan \
-  --target ./config \
+.venv/bin/python argus.py audit \
+  --target /path/to/your-agent-repository \
   --profile banking_agent \
-  --output ./reports
+  --output ./reports/banking-agent
 ```
 
 Reports are written to `report.json` and `report.md`.
 
-## Test a running endpoint
+## Test an authorized live model
+
+Live testing is opt-in. Use the provider adapter that matches the endpoint;
+the API key is read from an environment variable and is never written to the
+report. OpenAI-compatible gateways use the `openai` adapter too.
+
+```bash
+export OPENAI_API_KEY='...'
+.venv/bin/python argus.py audit \
+  --target /path/to/your-agent-repository \
+  --endpoint https://api.openai.com/v1/chat/completions \
+  --provider openai \
+  --model gpt-4o-mini \
+  --output ./reports/openai
+```
+
+Anthropic and local Ollama examples:
+
+```bash
+export ANTHROPIC_API_KEY='...'
+.venv/bin/python argus.py audit --target ./my-agent \
+  --endpoint https://api.anthropic.com/v1/messages \
+  --provider anthropic --model claude-3-5-haiku-20241022
+
+.venv/bin/python argus.py audit --target ./my-agent \
+  --endpoint http://127.0.0.1:11434/api/chat \
+  --provider ollama --model llama3.1
+```
+
+For an internal API, use `--provider generic`. It sends the same small
+contract used by the local fixture: `{"messages":[{"role":"user","content":"..."}]}`.
+For an authenticated gateway, keep the secret in an environment variable:
+
+```bash
+export ARGUS_GATEWAY_TOKEN='...'
+.venv/bin/python argus.py audit --target ./my-agent \
+  --endpoint https://llm.company.example/v1/messages \
+  --provider generic --api-key-env ARGUS_GATEWAY_TOKEN \
+  --auth-header X-API-Key
+```
+
+Only test endpoints and repositories you are authorized to evaluate. A failed
+live transport is an error, not a passing security result.
+
+## Test the repository's deterministic endpoint
 
 Terminal 1:
 
@@ -45,7 +98,7 @@ Terminal 1:
 Terminal 2:
 
 ```bash
-.venv/bin/python argus.py scan \
+.venv/bin/python argus.py audit \
   --target ./config \
   --endpoint http://127.0.0.1:8765/v1/messages \
   --fail-on CRITICAL \
@@ -53,6 +106,74 @@ Terminal 2:
 ```
 
 `--fail-on CRITICAL` is used here so the intentionally vulnerable demo endpoint can produce a report without making the demo command fail. Remove it to use the normal `HIGH` deployment gate.
+
+The fixture is a CI/test oracle, not a production model. Real company testing
+uses the provider commands above.
+
+## What Argus checks in MCP configurations
+
+Point `--target` at the repository containing `mcp.json`, `claude_desktop_config.json`,
+`mcpServers`, tool declarations, or server code. Argus understands structured
+JSON/YAML/TOML values and common MCP layouts, including examples such as:
+
+```json
+{
+  "mcpServers": {
+    "placements": {
+      "command": "npx",
+      "args": ["@company/placement-mcp"],
+      "env": {"*": "inherit"}
+    }
+  },
+  "tools": [{
+    "name": "send_email",
+    "description": "Send an email to any address",
+    "permissions": ["*"]
+  }]
+}
+```
+
+This produces evidence for broad environment access, wildcard/admin
+permissions, missing approval on high-impact tools, unpinned package runners,
+and other applicable findings. A static scan cannot discover tools hidden
+behind a running server; run it against the server repository and use the
+runtime gateway or an authorized live integration test for deployed traffic.
+
+## Audit an OpenClaw installation
+
+OpenClaw skills are instruction files that can cause an agent to use powerful
+tools. Audit the config and each skill root after installing or updating skills:
+
+```bash
+.venv/bin/python argus.py audit --target "$HOME/.openclaw" --output ./reports/openclaw
+.venv/bin/python argus.py audit \
+  --target "$HOME/.openclaw/workspace/skills" \
+  --output ./reports/openclaw-workspace-skills
+.venv/bin/python argus.py audit \
+  --target "$HOME/.agents/skills" \
+  --output ./reports/openclaw-agent-skills
+```
+
+Argus understands OpenClaw JSON5-style config, `mcp.servers`, `mcpServers`,
+`SKILL.md` files, skill environment/API-key entries, tool profiles, elevated
+execution, and common install commands. It flags authority-override
+instructions, arbitrary shell commands, secret harvesting, data exfiltration,
+unpinned downloads, and skills with no verifiable provenance metadata. A
+missing provenance record means “review required”; it is not by itself proof
+that a first-party skill is malicious.
+
+For live MCP connectivity, use OpenClaw's own authorized diagnostic first, then
+use Argus for repository evidence:
+
+```bash
+openclaw mcp doctor --probe
+openclaw mcp list --json > /tmp/openclaw-mcp.json
+.venv/bin/python argus.py audit --target /tmp/openclaw-mcp.json
+```
+
+Argus does not launch skill code or MCP servers during a static audit. This is
+intentional: the scan must be safe to run on an untrusted installation. Use
+the V2 runtime gateway for deployed request/tool enforcement.
 
 Only send probes to systems you are authorized to evaluate. See [WORKFLOW.md](WORKFLOW.md) for the complete walkthrough, architecture, design decisions, interview explanation, testing recipes, and troubleshooting guide.
 
@@ -118,6 +239,12 @@ The GitHub Actions workflow runs these checks plus a local mock integration scan
 
 ## Scope
 
-Argus V1 checks configuration posture and model behavior before deployment. Argus V2 optionally protects live traffic with a small provider-neutral gateway. Both layers are fail-closed for their defined policies but do not guarantee safety or replace human review. V2 expects a reachable JSON HTTP upstream, is not a public-internet TLS/authentication boundary by itself, and does not support token-by-token streaming by default.
+Argus V1 checks repository/configuration posture—including MCP servers, tools,
+and skill instruction files—and optionally tests model behavior before
+deployment. Argus V2 optionally protects live traffic with a small
+provider-neutral gateway. Both layers are fail-closed for their defined
+policies but do not guarantee safety or replace human review. V2 expects a
+reachable JSON HTTP upstream, is not a public-internet TLS/authentication
+boundary by itself, and does not support token-by-token streaming by default.
 
 For the reasoning behind the design, read [WORKFLOW.md](WORKFLOW.md).

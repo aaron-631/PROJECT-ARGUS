@@ -4,12 +4,88 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import tomllib
 from pathlib import Path
 import yaml
 
 from src.models import FileRecord, ScanContext
 from src.models.documents import DocumentKind, ParsedDocument
+
+
+def _strip_json5_comments(content: str) -> str:
+    """Remove JavaScript comments without changing quoted string contents."""
+
+    output: list[str] = []
+    index = 0
+    quote: str | None = None
+    escaped = False
+    while index < len(content):
+        char = content[index]
+        next_char = content[index + 1] if index + 1 < len(content) else ""
+        if quote:
+            output.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            output.append(char)
+            index += 1
+        elif char == "/" and next_char == "/":
+            index += 2
+            while index < len(content) and content[index] not in "\r\n":
+                index += 1
+        elif char == "/" and next_char == "*":
+            index += 2
+            while index + 1 < len(content) and content[index : index + 2] != "*/":
+                if content[index] in "\r\n":
+                    output.append(content[index])
+                index += 1
+            index += 2
+        else:
+            output.append(char)
+            index += 1
+    return "".join(output)
+
+
+def _load_json5_fallback(content: str) -> object:
+    """Parse the JSON5 subset used by common agent config files.
+
+    The optional ``json5`` dependency is the primary parser.  This fallback
+    keeps a source checkout usable before dependencies are installed and
+    handles comments, unquoted keys, single-quoted strings, and trailing
+    commas through PyYAML's safe loader.
+    """
+
+    cleaned = _strip_json5_comments(content)
+    cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+    try:
+        return yaml.safe_load(cleaned)
+    except yaml.YAMLError as exc:
+        raise json.JSONDecodeError("invalid JSON5 document", content, 0) from exc
+
+
+def _load_json_document(content: str) -> object:
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as original:
+        try:
+            import json5
+
+            return json5.loads(content)
+        except ImportError:
+            try:
+                return _load_json5_fallback(content)
+            except json.JSONDecodeError:
+                raise original
+        except Exception:
+            raise original
 
 
 def _line_map(content: str) -> dict[str, int]:
@@ -28,11 +104,11 @@ def parse_file(record: FileRecord) -> ParsedDocument:
     suffix = Path(record.path).suffix.lower()
     line_map = _line_map(record.content)
     try:
-        if suffix == ".json":
+        if suffix in {".json", ".json5"}:
             return ParsedDocument(
                 path=record.path,
                 kind=DocumentKind.JSON,
-                value=json.loads(record.content),
+                value=_load_json_document(record.content),
                 line_map=line_map,
             )
         if suffix in {".yaml", ".yml"}:
@@ -75,6 +151,7 @@ def parse_file(record: FileRecord) -> ParsedDocument:
     ) as exc:
         kind = {
             ".json": DocumentKind.JSON,
+            ".json5": DocumentKind.JSON,
             ".yaml": DocumentKind.YAML,
             ".yml": DocumentKind.YAML,
             ".toml": DocumentKind.TOML,

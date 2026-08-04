@@ -12,6 +12,7 @@ dependencies = [
     "cryptography>=42.0.0",
     "pydantic>=2.7.0,<3",
     "pyyaml>=6.0.1",
+    "json5>=0.9.25",
     "jsonschema>=4.21.0",
 ]
 

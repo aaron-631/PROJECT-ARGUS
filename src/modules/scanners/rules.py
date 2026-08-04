@@ -34,7 +34,7 @@ TEXT = frozenset({DocumentKind.TEXT})
 PYTHON = frozenset({DocumentKind.PYTHON_AST})
 ALL = STRUCTURED | TEXT | PYTHON
 PATTERN = STRUCTURED | TEXT
-CONFIG_EXTENSIONS = frozenset({".json", ".yaml", ".yml", ".toml"})
+CONFIG_EXTENSIONS = frozenset({".json", ".json5", ".yaml", ".yml", ".toml"})
 
 
 RULE_CAPABILITIES: dict[str, RuleCapability] = {
@@ -53,6 +53,18 @@ RULE_CAPABILITIES: dict[str, RuleCapability] = {
     "ARGUS_ST_013": RuleCapability("ARGUS_ST_013", CONFIG_EXTENSIONS, STRUCTURED, "structured"),
     "ARGUS_ST_014": RuleCapability("ARGUS_ST_014", frozenset(), PATTERN, "pattern"),
     "ARGUS_ST_015": RuleCapability("ARGUS_ST_015", frozenset(), PATTERN, "pattern"),
+    "ARGUS_ST_016": RuleCapability("ARGUS_ST_016", CONFIG_EXTENSIONS, STRUCTURED, "structured"),
+    "ARGUS_ST_017": RuleCapability("ARGUS_ST_017", CONFIG_EXTENSIONS, STRUCTURED, "structured"),
+    "ARGUS_ST_018": RuleCapability("ARGUS_ST_018", CONFIG_EXTENSIONS, STRUCTURED, "structured"),
+    "ARGUS_ST_019": RuleCapability("ARGUS_ST_019", CONFIG_EXTENSIONS, STRUCTURED, "structured"),
+    "ARGUS_ST_020": RuleCapability("ARGUS_ST_020", CONFIG_EXTENSIONS, STRUCTURED, "structured"),
+    "ARGUS_ST_021": RuleCapability("ARGUS_ST_021", CONFIG_EXTENSIONS, STRUCTURED, "structured"),
+    "ARGUS_ST_022": RuleCapability("ARGUS_ST_022", frozenset(), PATTERN, "pattern"),
+    "ARGUS_ST_023": RuleCapability("ARGUS_ST_023", frozenset(), PATTERN, "pattern"),
+    "ARGUS_ST_024": RuleCapability("ARGUS_ST_024", frozenset(), PATTERN, "pattern"),
+    "ARGUS_ST_025": RuleCapability("ARGUS_ST_025", frozenset(), PATTERN, "pattern"),
+    "ARGUS_ST_026": RuleCapability("ARGUS_ST_026", frozenset(), PATTERN, "pattern"),
+    "ARGUS_ST_027": RuleCapability("ARGUS_ST_027", frozenset(), PATTERN, "pattern"),
 }
 
 

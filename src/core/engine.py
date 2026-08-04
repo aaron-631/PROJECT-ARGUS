@@ -10,11 +10,13 @@ from src.core.evaluation import EvaluationPipeline
 from src.core.rate_limiter import TokenBucketRateLimiter, parse_retry_after
 from src.core.sanitization import sanitize_value
 from src.core.registry import get_enabled_modules
-from src.core.target_client import HTTPTargetClient, TargetClient
+from src.core.target_client import HTTPTargetClient, TargetClient, resolve_api_key
 from src.interfaces.judge import HTTPJudgeBackend, MockJudgeBackend, NullJudgeBackend
 from src.models import AttackResult, Finding, ScanContext
 from src.models.config import ArgusConfig
 from src.modules.attacks.dataset import dataset_version
+
+_SEVERITY_ORDER = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
 
 class ArgusEngine:
@@ -61,6 +63,26 @@ class ArgusEngine:
         return sorted(
             findings, key=lambda item: (item.rule_id, item.source_file or "", item.line or 0)
         )
+
+    def _inventory(
+        self, context: ScanContext, registry: dict[str, dict[str, type[Any]]]
+    ) -> dict[str, Any]:
+        inventory: dict[str, Any] = {"mcp_servers": [], "mcp_tools": [], "skills": []}
+        for scanner_id, scanner_cls in registry["scanners"].items():
+            collect = getattr(scanner_cls, "inventory", None)
+            if collect is None:
+                continue
+            try:
+                discovered = collect(context)
+                for key in inventory:
+                    inventory[key].extend(discovered.get(key, []))
+            except Exception as exc:
+                self._errors.append(f"scanner inventory {scanner_id}: {type(exc).__name__}")
+        for key in inventory:
+            inventory[key] = sorted(
+                inventory[key], key=lambda item: (item.get("file", ""), item.get("name", ""))
+            )
+        return inventory
 
     async def _attack_one(
         self,
@@ -154,7 +176,12 @@ class ArgusEngine:
         if self.target_client is None:
             if endpoint is None:
                 raise RuntimeError("dynamic attacks require a target endpoint")
-            self.target_client = HTTPTargetClient(endpoint, self.config.engine.timeout_seconds)
+            self.target_client = HTTPTargetClient(
+                endpoint,
+                self.config.engine.timeout_seconds,
+                target=self.config.target,
+                api_key=resolve_api_key(self.config.target),
+            )
         limiter = TokenBucketRateLimiter(self.config.engine.rate_limit_rps)
         semaphore = asyncio.Semaphore(self.config.engine.max_concurrent_attacks)
         evaluator = EvaluationPipeline(self._judge(), self.config.c_env)
@@ -186,6 +213,7 @@ class ArgusEngine:
         )
         registry = get_enabled_modules(self.config)
         findings = await self._run_scanners(context, registry)
+        inventory = self._inventory(context, registry)
         attack_results = await self._run_attacks(context, registry)
         if self.target_client is not None:
             close = getattr(self.target_client, "close", None)
@@ -202,6 +230,16 @@ class ArgusEngine:
             if any(item.judge_score is not None for item in attack_results)
             else "canonical_only"
         )
+        fail_threshold = _SEVERITY_ORDER[self.config.reporting.fail_on]
+        blocked = any(
+            _SEVERITY_ORDER.get(item.severity.value, 0) >= fail_threshold for item in findings
+        ) or any(
+            item.canonical_result.get("attack_succeeded")
+            and fail_threshold <= _SEVERITY_ORDER["HIGH"]
+            for item in attack_results
+        )
+        dynamic_errors = sum(bool(item.error) for item in attack_results)
+        decision = "ERROR" if dynamic_errors else "BLOCK" if blocked else "PASS"
         return {
             "metadata": {
                 "schema_version": "1.0",
@@ -226,6 +264,10 @@ class ArgusEngine:
                     + [0.0]
                 ),
                 "errors": [*context.document_errors, *self._errors],
+                "dynamic_error_count": dynamic_errors,
+                "fail_on": self.config.reporting.fail_on,
+                "decision": decision,
+                **inventory,
             },
             "evaluation_methodology": methodology,
         }
