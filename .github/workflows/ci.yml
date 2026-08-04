@@ -11,7 +11,21 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - run: black --check src/ tests/
-      - run: flake8 src/ tests/
+      - run: black --check --target-version py311 src/ tests/ argus.py
+      - run: flake8 --max-line-length=100 src/ tests/ argus.py
       - run: mypy src/
       - run: pytest tests/ -v
+      - name: Validate JSON contracts
+        run: |
+          PYTHONPATH=. python -m src.models.schema_generation --check
+      - name: Run local mock integration scan
+        run: |
+          python tests/mock_server.py >/tmp/argus-mock.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          sleep 1
+          python argus.py scan --target config --endpoint http://127.0.0.1:8765/v1/messages --fail-on CRITICAL --output /tmp/argus-reports
+      - name: Build Docker image
+        run: docker build -t argus-ci .
+      - name: Validate Docker Compose
+        run: docker compose config

@@ -1,4 +1,5 @@
 # Low-stakes public-facing bot
 profile: public_faq
 c_env: 0.1
+deployment_context: public
 description: "Public FAQ chatbot — minimal risk sensitivity"

@@ -1,21 +1,109 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Finding",
-  "description": "Structured output from a static scanner",
-  "type": "object",
-  "required": ["rule_id", "severity", "title", "description", "confidence_score", "evidence"],
+  "$defs": {
+    "Severity": {
+      "enum": [
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW"
+      ],
+      "title": "Severity",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
   "properties": {
-    "rule_id": { "type": "string" },
-    "severity": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"] },
-    "title": { "type": "string" },
-    "description": { "type": "string" },
-    "confidence_score": {
-      "type": "number",
-      "minimum": 0.0,
-      "maximum": 0.92,
-      "description": "Never 1.0 — auditors distrust absolute certainty"
+    "base_score": {
+      "default": 1.0,
+      "maximum": 10.0,
+      "minimum": 1.0,
+      "title": "Base Score",
+      "type": "number"
     },
-    "evidence": { "type": "object" },
-    "evaluation_methodology": { "type": "string" }
-  }
+    "confidence_score": {
+      "maximum": 0.92,
+      "minimum": 0.0,
+      "title": "Confidence Score",
+      "type": "number"
+    },
+    "deployment_context": {
+      "default": "default",
+      "title": "Deployment Context",
+      "type": "string"
+    },
+    "description": {
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "evaluation_methodology": {
+      "default": "deterministic_static",
+      "title": "Evaluation Methodology",
+      "type": "string"
+    },
+    "evidence": {
+      "additionalProperties": true,
+      "title": "Evidence",
+      "type": "object"
+    },
+    "line": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Line"
+    },
+    "remediation": {
+      "default": "",
+      "title": "Remediation",
+      "type": "string"
+    },
+    "risk_score": {
+      "default": 0.0,
+      "maximum": 10.0,
+      "minimum": 0.0,
+      "title": "Risk Score",
+      "type": "number"
+    },
+    "rule_id": {
+      "pattern": "^ARGUS_ST_[0-9]{3}$",
+      "title": "Rule Id",
+      "type": "string"
+    },
+    "severity": {
+      "$ref": "#/$defs/Severity"
+    },
+    "source_file": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source File"
+    },
+    "title": {
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "rule_id",
+    "severity",
+    "title",
+    "description",
+    "confidence_score"
+  ],
+  "title": "Finding",
+  "type": "object"
 }

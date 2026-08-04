@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "datasets": [
+    {
+      "attack_type": "data_extraction",
+      "path": "data_extraction/partial_leakage/payloads.json",
+      "sha256": "2879348f7db40b01ec03d43f30f23ad7b2dd42a702accc9e6522e4580688c975"
+    },
+    {
+      "attack_type": "jailbreaks",
+      "path": "jailbreaks/hypothetical_scenarios/payloads.json",
+      "sha256": "08053c2115d418e813b5e7e3d3bac25a11ba39e3b49a4ec624d739bd1791ef95"
+    },
+    {
+      "attack_type": "prompt_injection",
+      "path": "prompt_injection/direct_system_override/payloads.json",
+      "sha256": "9fb8ff12ec084721d5f99ee640fc04eee931dde487487fa779f539bd5ccf8e65"
+    }
+  ]
+}

@@ -1,10 +1,14 @@
 # Argus Default Configuration
 version: "1.0"
+deployment_context: human_in_loop
 
 engine:
   max_concurrent_attacks: 10
   rate_limit_rps: 5
   timeout_seconds: 30
+  max_retries: 3
+  backoff_base_seconds: 0.25
+  max_file_size_bytes: 1048576
 
 judge:
   backend: "NullJudgeBackend"  # Default: no external calls
@@ -12,7 +16,12 @@ judge:
 reporting:
   formats: ["json", "markdown"]
   output_dir: "./reports"
+  fail_on: "HIGH"
 
 vault:
   enabled: true
   vault_dir: ".vault"
+
+scanners: ["mcp_scanner"]
+attacks: ["prompt_injection", "jailbreak", "data_extraction"]
+dataset_version: "1.0.0"

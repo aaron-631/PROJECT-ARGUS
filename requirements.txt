@@ -1,6 +1,9 @@
 # Async
 aiohttp>=3.9.0
 
+# Runtime validation
+pydantic>=2.7.0,<3
+
 # Crypto
 cryptography>=42.0.0
 
@@ -13,6 +16,7 @@ click>=8.1.7
 # Testing
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
+jsonschema>=4.21.0
 
 # Code quality
 black>=24.0.0

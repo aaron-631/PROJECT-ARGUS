@@ -1,4 +1,5 @@
 # High-stakes production environment
 profile: banking_agent
 c_env: 1.0
+deployment_context: production
 description: "Production autonomous banking agent — maximum risk sensitivity"

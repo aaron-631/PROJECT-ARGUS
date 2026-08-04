@@ -1,10 +1,18 @@
-version: "3.9"
 services:
+  mock:
+    build: .
+    command: ["python", "tests/mock_server.py"]
+    expose:
+      - "8765"
+
   argus:
     build: .
+    command: ["scan", "--target", "/app/config", "--output", "/app/reports"]
+    depends_on:
+      - mock
     volumes:
       - ./config:/app/config:ro
       - ./reports:/app/reports
       - ./.vault:/app/.vault
     environment:
-      - ARGUS_ENV=production
+      - ARGUS_TARGET_ENDPOINT=http://mock:8765/v1/messages

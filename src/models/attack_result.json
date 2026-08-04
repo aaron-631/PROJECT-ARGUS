@@ -1,17 +1,92 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "AttackResult",
-  "description": "Structured output from an attack module execution",
-  "type": "object",
-  "required": ["module_id", "attack_type", "payload", "raw_response", "canonical_result", "risk_score"],
+  "additionalProperties": false,
   "properties": {
-    "module_id": { "type": "string" },
-    "attack_type": { "type": "string" },
-    "payload": { "type": "string" },
-    "raw_response": { "type": "string" },
-    "canonical_result": { "type": "object" },
-    "judge_score": { "type": ["number", "null"] },
-    "risk_score": { "type": "number" },
-    "evaluation_methodology": { "type": "string" }
-  }
+    "attack_type": {
+      "minLength": 1,
+      "title": "Attack Type",
+      "type": "string"
+    },
+    "canonical_result": {
+      "additionalProperties": true,
+      "title": "Canonical Result",
+      "type": "object"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "evaluation_methodology": {
+      "default": "canonical_only",
+      "title": "Evaluation Methodology",
+      "type": "string"
+    },
+    "heuristic_score": {
+      "default": 0.0,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Heuristic Score",
+      "type": "number"
+    },
+    "judge_score": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Judge Score"
+    },
+    "module_id": {
+      "minLength": 1,
+      "title": "Module Id",
+      "type": "string"
+    },
+    "module_version": {
+      "default": "1.0.0",
+      "title": "Module Version",
+      "type": "string"
+    },
+    "payload": {
+      "minLength": 1,
+      "title": "Payload",
+      "type": "string"
+    },
+    "payload_id": {
+      "default": "unknown",
+      "title": "Payload Id",
+      "type": "string"
+    },
+    "raw_response": {
+      "default": "",
+      "title": "Raw Response",
+      "type": "string"
+    },
+    "risk_score": {
+      "default": 0.0,
+      "maximum": 10.0,
+      "minimum": 0.0,
+      "title": "Risk Score",
+      "type": "number"
+    }
+  },
+  "required": [
+    "module_id",
+    "attack_type",
+    "payload"
+  ],
+  "title": "AttackResult",
+  "type": "object"
 }

@@ -1,12 +1,19 @@
 [build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "argus-framework"
 version = "0.1.0"
 description = "Enterprise-grade AI security evaluation framework for LLMs and autonomous agent ecosystems"
 requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.9.0",
+    "cryptography>=42.0.0",
+    "pydantic>=2.7.0,<3",
+    "pyyaml>=6.0.1",
+    "jsonschema>=4.21.0",
+]
 
 [tool.black]
 line-length = 100
@@ -18,3 +25,4 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]

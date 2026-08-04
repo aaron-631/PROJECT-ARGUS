@@ -1,8 +1,12 @@
 """
 BaseAttackModule — every attack module must implement this interface.
 """
+
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.models import AttackProbe
 
 
 class BaseAttackModule(ABC):
@@ -10,11 +14,17 @@ class BaseAttackModule(ABC):
     version: str
 
     @abstractmethod
-    async def probe_stream(self, target_endpoint: str) -> AsyncGenerator[dict, None]:
+    def probe_stream(
+        self, target_endpoint: str | None = None
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Yields attack probes to be sent to the target."""
         ...
 
     @abstractmethod
-    def evaluate_canonical(self, response: str) -> dict:
+    def evaluate_canonical(self, response: str) -> dict[str, Any]:
         """Deterministic result scoring — no external calls."""
         ...
+
+    def probes(self) -> list["AttackProbe"]:
+        """Optional synchronous dataset access used by injected target clients."""
+        return []
