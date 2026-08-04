@@ -37,6 +37,21 @@ def load_runtime_config(
         merged["upstream_url"] = env["ARGUS_RUNTIME_UPSTREAM_URL"]
     if env.get("ARGUS_RUNTIME_AUDIT_PATH"):
         merged["audit_path"] = env["ARGUS_RUNTIME_AUDIT_PATH"]
+    for environment_name, config_key in {
+        "ARGUS_RUNTIME_LISTEN_HOST": "listen_host",
+        "ARGUS_RUNTIME_LISTEN_PORT": "listen_port",
+        "ARGUS_RUNTIME_MAX_BODY_BYTES": "max_body_bytes",
+        "ARGUS_RUNTIME_TIMEOUT_SECONDS": "request_timeout_seconds",
+        "ARGUS_RUNTIME_ALLOW_BUFFERED_STREAMING": "allow_buffered_streaming",
+    }.items():
+        if env.get(environment_name):
+            merged[config_key] = env[environment_name]
+    if env.get("ARGUS_RUNTIME_FORWARD_HEADERS"):
+        merged["forward_headers"] = [
+            header.strip()
+            for header in env["ARGUS_RUNTIME_FORWARD_HEADERS"].split(",")
+            if header.strip()
+        ]
     try:
         return RuntimeConfig.model_validate(merged)
     except Exception as exc:

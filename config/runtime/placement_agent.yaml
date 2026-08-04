@@ -5,6 +5,18 @@ listen_host: 127.0.0.1
 listen_port: 8080
 max_body_bytes: 1048576
 request_timeout_seconds: 30
+allow_buffered_streaming: false
+forward_headers:
+  - accept
+  - authorization
+  - content-type
+  - x-request-id
+  - x-api-key
+  - api-key
+  - anthropic-version
+  - anthropic-beta
+  - openai-organization
+  - openai-project
 approval_header: X-Argus-Approval-Token
 approval_token_env: ARGUS_RUNTIME_APPROVAL_TOKEN
 audit_path: ./runtime-audit/events.jsonl

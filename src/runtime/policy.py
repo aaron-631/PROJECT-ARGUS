@@ -67,10 +67,11 @@ def _tool_name(value: Any) -> str | None:
 
 def _tool_calls(body: dict[str, Any]) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
+    tool_keys = {"tool_call", "tool_calls", "tool_use", "tool_uses"}
 
     def visit(value: Any, key: str = "") -> None:
         if isinstance(value, dict):
-            if key in {"tool_call", "tool_calls"}:
+            if key in tool_keys:
                 if isinstance(value, list):
                     for item in value:
                         if isinstance(item, dict):
@@ -78,8 +79,11 @@ def _tool_calls(body: dict[str, Any]) -> list[dict[str, Any]]:
                 elif _tool_name(value):
                     calls.append(value)
                 return
+            if value.get("type") in tool_keys and _tool_name(value):
+                calls.append(value)
+                return
             for child_key, child in value.items():
-                if child_key in {"tool_call", "tool_calls"}:
+                if child_key in tool_keys:
                     visit(child, child_key)
                 elif isinstance(child, (dict, list)):
                     visit(child, child_key)
@@ -93,7 +97,11 @@ def _tool_calls(body: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _tool_arguments(call: dict[str, Any]) -> Any:
     function = call.get("function")
-    arguments = function.get("arguments") if isinstance(function, dict) else call.get("arguments")
+    arguments = (
+        function.get("arguments")
+        if isinstance(function, dict)
+        else call.get("arguments", call.get("input"))
+    )
     if isinstance(arguments, str):
         try:
             return json.loads(arguments)

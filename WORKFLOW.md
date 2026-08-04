@@ -338,7 +338,7 @@ Only do this against an endpoint and data you are authorized to test:
   --output ./reports/authorized-test
 ```
 
-If the endpoint requires custom authentication headers, extend the target adapter or add a small authenticated adapter; the current target client sends `Content-Type: application/json` and does not expose a CLI header flag. HTTP judge headers configure the optional judge call, not the target call.
+For V1 dynamic scans, if the endpoint requires custom authentication headers, extend the target adapter or add a small authenticated adapter; the current scan target client sends `Content-Type: application/json` and does not expose a CLI header flag. HTTP judge headers configure the optional judge call, not the target call. V2 has its own configurable upstream-header allowlist.
 
 ## 6.5 Runtime monitoring and blocking gateway (Argus V2)
 
@@ -383,8 +383,11 @@ The gateway forwards allowed traffic to the configured upstream. It exposes:
 | Endpoint | Purpose |
 | --- | --- |
 | `POST /v1/messages` | Enforced model traffic |
+| `POST /v1/chat/completions` | OpenAI-compatible route alias using the same policies |
 | `GET /healthz` | Liveness check |
 | `GET /metrics` | Prometheus-compatible counters |
+
+The gateway is wire-format agnostic at the HTTP boundary: it forwards the original JSON body and a configurable safe header allowlist to the upstream. The default includes `Authorization`, `x-api-key`, `api-key`, Anthropic version headers, and OpenAI organization/project headers. The Argus approval header, `Host`, `Content-Length`, and other hop-by-hop headers are never forwarded. The policy extractor understands common OpenAI-style `tool_calls`, generic `tool_call`, and Anthropic-style `tool_use`/content blocks. It does not translate provider-specific schemas or invent missing fields.
 
 ### Request policies
 
@@ -422,6 +425,8 @@ curl -i http://127.0.0.1:8080/v1/messages \
 The approval header is not forwarded to the upstream. In a real deployment, the approval token should come from an authenticated approval service or short-lived signed decision, not a permanent shared string.
 
 External email destinations are blocked unless their domain is in the configured allowlist. The example policy allows `university.edu`, so `student@gmail.com` is blocked even when the tool itself has approval.
+
+Requests with `"stream": true` return HTTP `501` by default. This is intentional: the gateway must see the complete response before it can safely inspect tool calls, credentials, and personal data. Set `ARGUS_RUNTIME_ALLOW_BUFFERED_STREAMING=true` only when buffering the entire provider stream is acceptable.
 
 ### Response policies
 
@@ -482,6 +487,53 @@ docker compose down
 ```
 
 The gateway is intentionally a separate service from the static scanner. The scanner is a release gate; the gateway is a live enforcement point. Keeping them separate makes both components easier to deploy, test, and reason about.
+
+### Deployment modes and environment contract
+
+There are two Compose files with different purposes:
+
+| File | Use | Upstream |
+| --- | --- | --- |
+| `docker-compose.yml` | Repository demo and CI proof | Internal `mock` service; run `mock runtime` |
+| `docker-compose.runtime.yml` | Reusable deployment on another computer | Required `ARGUS_RUNTIME_UPSTREAM_URL` |
+
+For a reusable deployment:
+
+```bash
+cp .env.runtime.example .env.runtime
+# Set the real upstream URL and replace both secret placeholders.
+docker compose --env-file .env.runtime -f docker-compose.runtime.yml up --build
+```
+
+The supported deployment variables are:
+
+| Variable | Meaning | Example |
+| --- | --- | --- |
+| `ARGUS_RUNTIME_UPSTREAM_URL` | Absolute `http://` or `https://` model endpoint reachable from the gateway | `https://model.internal/v1/messages` |
+| `ARGUS_RUNTIME_PORT` | Host port mapped to gateway port `8080` | `18080` |
+| `ARGUS_RUNTIME_APPROVAL_TOKEN` | Short-lived approval secret for the demo gate | Inject from a secret manager |
+| `ARGUS_RUNTIME_AUDIT_KEY` | Optional HMAC key for audit authenticity | Inject from a secret manager |
+| `ARGUS_RUNTIME_LISTEN_HOST` / `PORT` | Direct-process bind overrides | `0.0.0.0` / `8080` |
+| `ARGUS_RUNTIME_MAX_BODY_BYTES` | Request and response size limit | `1048576` |
+| `ARGUS_RUNTIME_TIMEOUT_SECONDS` | Upstream timeout | `30` |
+| `ARGUS_RUNTIME_ALLOW_BUFFERED_STREAMING` | Permit `stream: true`, but buffer it fully before returning | `false` |
+| `ARGUS_RUNTIME_FORWARD_HEADERS` | Comma-separated upstream header allowlist override | `authorization,x-api-key,anthropic-version` |
+
+Inside Docker, `127.0.0.1` means the gateway container, not the host or another container. Use Compose service DNS, `host.docker.internal`, or a reachable machine name. The generic Compose file adds the host-gateway mapping for Docker environments that support it.
+
+### What “works in production” means here
+
+The gateway is suitable as a deployable policy component when the agent uses JSON over HTTP, the upstream is reachable, and traffic is placed behind it. Before exposing it to real users, add:
+
+1. TLS and client authentication at a reverse proxy or service mesh;
+2. a real approval service or signed short-lived decision instead of a shared token;
+3. secret-manager injection for upstream credentials and the audit HMAC key;
+4. persistent or shipped audit storage, log rotation, and Prometheus alerting;
+5. a deployment health/readiness policy and at least one provider-specific integration test;
+6. `stream: false` unless buffered streaming is explicitly accepted;
+7. a network rule preventing clients from bypassing the gateway.
+
+These are operational boundaries, not hidden assumptions. The repository demo is end-to-end runnable on Docker-capable machines; the reusable Compose file removes the mock dependency for a real upstream, while production identity, TLS, and availability remain deployment responsibilities.
 
 ## 7. What happens inside a scan
 
@@ -895,6 +947,8 @@ mock  ──healthy──>  argus scan
   └──healthy──>  runtime gateway :8080
 ```
 
+`docker-compose.runtime.yml` is the portable runtime-only variant. It has no mock dependency and requires `ARGUS_RUNTIME_UPSTREAM_URL`, so it can point at a model service on the host, another container platform, or another machine.
+
 The important Compose decisions are:
 
 - `mock.entrypoint` overrides the image entrypoint, otherwise Docker would execute `python argus.py python tests/mock_server.py`;
@@ -931,7 +985,7 @@ docker compose down
 7. verify generated JSON Schemas;
 8. start the local mock and run an integration scan;
 9. build the Docker image;
-10. validate the Compose configuration;
+10. validate both the repository demo Compose file and the reusable runtime Compose file;
 11. start `mock` and the runtime gateway, then test health, request blocking, forwarding, and metrics;
 12. start the full Compose deployment and require the Argus service to exit successfully.
 
@@ -1079,6 +1133,12 @@ This is a security-gate result, not necessarily a program crash. Open `report.md
 
 Check that the server is running, the path is `/v1/messages`, and the endpoint is reachable from the same network namespace. In Compose, use `http://mock:8765/v1/messages`, not `127.0.0.1`, because `127.0.0.1` inside the Argus container means the Argus container itself.
 
+For V2, check `ARGUS_RUNTIME_UPSTREAM_URL` from inside the gateway's network. A host service is usually `http://host.docker.internal:<port>/...`; a Compose service is `http://service-name:<port>/...`; a Kubernetes service uses its cluster DNS name. A URL that works in a browser on the host may still be unreachable from a container.
+
+### The model client receives a streaming error
+
+V2 buffers responses before returning them so it can inspect secrets, PII, and tool calls. Send `"stream": false`. Setting `ARGUS_RUNTIME_ALLOW_BUFFERED_STREAMING=true` permits a streaming request but still buffers the complete response; it does not provide token-by-token streaming.
+
 ### JSON Schema validation fails
 
 Regenerate the committed artifacts and check them again:
@@ -1114,6 +1174,8 @@ Current limits:
 - the normal report intentionally omits raw model responses;
 - the V2 gateway can enforce the defined policies on traffic routed through it, but it does not automatically observe traffic that bypasses the gateway;
 - the gateway has no built-in production authentication/mTLS, distributed deployment, dashboard/SIEM integration, or high-availability coordination;
+- provider-specific request translation is not included; the upstream must already accept the client's JSON shape and the gateway only understands common tool-call shapes;
+- token-by-token streaming is not supported; responses are buffered for inspection;
 - the default semantic judge is disabled.
 
 Natural next steps would be a larger curated dataset, pluggable authenticated target adapters, richer workflow schema support, more integration fixtures, gateway authentication/mTLS, distributed audit shipping, and Prometheus/SIEM dashboards. These hardening steps are intentionally separate from the compact local demo.
@@ -1357,6 +1419,8 @@ Before an interview, you should be able to do all of these without opening anoth
 - explain the Docker mock entrypoint and health check;
 - start the runtime gateway, trigger a `403` policy block, and inspect `/metrics` and the audit JSONL;
 - explain why `428` means approval is required and why `502` can mean sensitive output was blocked;
+- run the reusable `docker-compose.runtime.yml` with a configured upstream URL;
+- explain why container DNS, TLS/authentication, secret injection, and `stream: false` matter;
 - state at least three limits without pretending they are solved;
 - answer “what would you build next?” with authenticated adapters, broader datasets, gateway authentication/mTLS, distributed audit shipping, and SIEM integration.
 

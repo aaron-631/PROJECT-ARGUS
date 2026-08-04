@@ -106,6 +106,16 @@ def test_response_tool_calls_are_blocked_or_held_for_approval() -> None:
     assert review_body is None
 
 
+def test_anthropic_style_tool_use_is_enforced() -> None:
+    policy = RuntimePolicy(load_runtime_config().policy)
+    response = {"content": [{"type": "tool_use", "name": "delete_student_record", "input": {}}]}
+
+    decision, body = policy.inspect_response(response)
+
+    assert decision.decision == "block"
+    assert body is None
+
+
 def test_runtime_config_accepts_deployment_overrides(tmp_path: Path) -> None:
     config_file = tmp_path / "runtime.yaml"
     config_file.write_text("upstream_url: http://localhost:9999/v1/messages\n", encoding="utf-8")
@@ -124,3 +134,21 @@ def test_runtime_config_rejects_non_http_upstream(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="absolute http or https"):
         load_runtime_config(config_file)
+
+
+def test_runtime_config_accepts_operational_environment_overrides() -> None:
+    config = load_runtime_config(
+        environ={
+            "ARGUS_RUNTIME_LISTEN_HOST": "0.0.0.0",
+            "ARGUS_RUNTIME_LISTEN_PORT": "18080",
+            "ARGUS_RUNTIME_MAX_BODY_BYTES": "2048",
+            "ARGUS_RUNTIME_TIMEOUT_SECONDS": "12",
+            "ARGUS_RUNTIME_ALLOW_BUFFERED_STREAMING": "true",
+        }
+    )
+
+    assert config.listen_host == "0.0.0.0"
+    assert config.listen_port == 18080
+    assert config.max_body_bytes == 2048
+    assert config.request_timeout_seconds == 12
+    assert config.allow_buffered_streaming is True

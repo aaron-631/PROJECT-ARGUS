@@ -28,7 +28,9 @@ jobs:
       - name: Build Docker image
         run: docker build -t argus-ci .
       - name: Validate Docker Compose
-        run: docker compose config
+        run: |
+          docker compose config
+          docker compose --env-file .env.runtime.example -f docker-compose.runtime.yml config
       - name: Run runtime gateway HTTP smoke test
         run: |
           set -e

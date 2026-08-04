@@ -77,7 +77,19 @@ curl --fail http://127.0.0.1:8080/metrics
 docker compose down
 ```
 
-The gateway listens on `POST /v1/messages` and forwards allowed requests to the configured upstream. See [WORKFLOW.md](WORKFLOW.md) for the policy examples, approval flow, audit format, tradeoffs, and real-time testing walkthrough.
+The gateway listens on `POST /v1/messages` and `POST /v1/chat/completions`, then forwards allowed JSON traffic to the configured upstream. See [WORKFLOW.md](WORKFLOW.md) for the policy examples, approval flow, audit format, tradeoffs, provider compatibility, and real-time testing walkthrough.
+
+Common `Authorization`, `x-api-key`, and provider-version headers are forwarded by default; the Argus approval header is never forwarded. Custom upstream header allowlists can be set through `ARGUS_RUNTIME_FORWARD_HEADERS`.
+
+To run V2 against your own model service on another computer:
+
+```bash
+cp .env.runtime.example .env.runtime
+# Edit ARGUS_RUNTIME_UPSTREAM_URL and the secret placeholders.
+docker compose --env-file .env.runtime -f docker-compose.runtime.yml up --build
+```
+
+The upstream URL must be reachable from the gateway container. For a model running on the host, use `http://host.docker.internal:<port>/...`; for Kubernetes or another machine, use its service/DNS name or reachable HTTPS URL. Send non-streaming JSON (`"stream": false`); the gateway buffers responses so it can inspect them safely.
 
 ## CI and development checks
 
@@ -93,6 +105,6 @@ The GitHub Actions workflow runs these checks plus a local mock integration scan
 
 ## Scope
 
-Argus V1 checks configuration posture and model behavior before deployment. Argus V2 optionally protects live traffic with a small provider-neutral gateway. Both layers are fail-closed for their defined policies but do not guarantee safety or replace human review. Dynamic testing is opt-in, local attack data is versioned and hashed, and the default judge is air-gapped.
+Argus V1 checks configuration posture and model behavior before deployment. Argus V2 optionally protects live traffic with a small provider-neutral gateway. Both layers are fail-closed for their defined policies but do not guarantee safety or replace human review. V2 expects a reachable JSON HTTP upstream, is not a public-internet TLS/authentication boundary by itself, and does not support token-by-token streaming by default.
 
 For the reasoning behind the design, read [WORKFLOW.md](WORKFLOW.md).

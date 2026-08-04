@@ -64,7 +64,12 @@ async def test_gateway_forwards_allowed_request_and_records_audit(tmp_path: Path
         json.dumps(
             {"messages": [{"role": "user", "content": "When is the career fair?"}]}
         ).encode(),
-        {"Content-Type": "application/json", "X-Request-ID": "placement-1"},
+        {
+            "Content-Type": "application/json",
+            "X-Request-ID": "placement-1",
+            "X-API-Key": "upstream-key",
+            "X-Argus-Approval-Token": "must-not-forward",
+        },
     )
 
     response = await gateway.handle_messages(request)  # type: ignore[arg-type]
@@ -72,6 +77,8 @@ async def test_gateway_forwards_allowed_request_and_records_audit(tmp_path: Path
     assert response.status == 200
     assert response.headers["X-Argus-Decision"] == "allow"
     assert len(session.calls) == 1
+    assert session.calls[0]["headers"]["X-API-Key"] == "upstream-key"
+    assert "X-Argus-Approval-Token" not in session.calls[0]["headers"]
     audit = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
     assert "When is the career fair?" not in audit
     assert "placement-1" in audit
@@ -175,6 +182,31 @@ async def test_gateway_holds_model_proposed_approval_tool(tmp_path: Path) -> Non
 
     assert response.status == 428
     assert response.headers["X-Argus-Decision"] == "review"
+
+
+@pytest.mark.asyncio
+async def test_gateway_rejects_streaming_by_default(tmp_path: Path) -> None:
+    config = load_runtime_config(
+        environ={"ARGUS_RUNTIME_AUDIT_PATH": str(tmp_path / "events.jsonl")}
+    )
+    session = FakeSession(FakeResponse({"content": "must not be reached"}))
+    gateway = RuntimeGateway(
+        config,
+        session=session,  # type: ignore[arg-type]
+        audit=AuditWriter(tmp_path / "events.jsonl"),
+    )
+
+    response = await gateway.handle_messages(
+        FakeRequest(
+            json.dumps(
+                {"stream": True, "messages": [{"role": "user", "content": "hello"}]}
+            ).encode()
+        )  # type: ignore[arg-type]
+    )
+
+    assert response.status == 501
+    assert len(session.calls) == 0
+    assert "STREAMING_UNSUPPORTED" in response.text
 
 
 def test_audit_hash_chain_and_hmac_are_verifiable(tmp_path: Path) -> None:

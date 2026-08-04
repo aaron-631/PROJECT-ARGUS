@@ -17,6 +17,7 @@ build/
 # Env files — GDPR: no secrets in repo
 .env
 *.env
+.env.runtime
 
 # IDE
 .vscode/

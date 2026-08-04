@@ -1,0 +1,17 @@
+services:
+  runtime:
+    build: .
+    entrypoint: ["python", "runtime_gateway.py"]
+    command: ["--config", "/app/config/runtime/placement_agent.yaml", "--host", "0.0.0.0"]
+    ports:
+      - "${ARGUS_RUNTIME_PORT:-8080}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./config/runtime:/app/config/runtime:ro
+      - ./runtime-audit:/app/runtime-audit
+    environment:
+      ARGUS_RUNTIME_UPSTREAM_URL: ${ARGUS_RUNTIME_UPSTREAM_URL:?Set ARGUS_RUNTIME_UPSTREAM_URL}
+      ARGUS_RUNTIME_AUDIT_PATH: /app/runtime-audit/events.jsonl
+      ARGUS_RUNTIME_APPROVAL_TOKEN: ${ARGUS_RUNTIME_APPROVAL_TOKEN:-}
+      ARGUS_RUNTIME_AUDIT_KEY: ${ARGUS_RUNTIME_AUDIT_KEY:-}

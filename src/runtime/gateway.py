@@ -107,10 +107,20 @@ class RuntimeGateway:
             headers={"X-Argus-Decision": decision, "X-Request-ID": request_id},
         )
 
-    @staticmethod
-    def _forward_headers(request: web.Request) -> dict[str, str]:
-        allowed = {"accept", "authorization", "content-type", "x-request-id"}
-        return {key: value for key, value in request.headers.items() if key.lower() in allowed}
+    def _forward_headers(self, request: web.Request) -> dict[str, str]:
+        allowed = {header.lower() for header in self.config.forward_headers}
+        never_forward = {
+            "connection",
+            "content-length",
+            "host",
+            "transfer-encoding",
+            self.config.approval_header.lower(),
+        }
+        return {
+            key: value
+            for key, value in request.headers.items()
+            if key.lower() in allowed and key.lower() not in never_forward
+        }
 
     async def handle_messages(self, request: web.Request) -> web.Response:
         started = perf_counter()
@@ -129,6 +139,11 @@ class RuntimeGateway:
             body: Any = json.loads(raw_body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return await self._policy_response(request_id, "block", ["INVALID_JSON"], 400, started)
+        if isinstance(body, dict) and body.get("stream") is True:
+            if not self.config.allow_buffered_streaming:
+                return await self._policy_response(
+                    request_id, "block", ["STREAMING_UNSUPPORTED"], 501, started
+                )
 
         configured_token = os.getenv(self.config.approval_token_env)
         decision = self.policy.inspect_request(
@@ -312,6 +327,7 @@ def create_app(config: RuntimeConfig) -> web.Application:
     app = web.Application(client_max_size=config.max_body_bytes)
     app["runtime_gateway"] = gateway
     app.router.add_post("/v1/messages", gateway.handle_messages)
+    app.router.add_post("/v1/chat/completions", gateway.handle_messages)
     app.router.add_get("/healthz", gateway.handle_health)
     app.router.add_get("/metrics", gateway.handle_metrics)
 

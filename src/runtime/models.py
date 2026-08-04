@@ -58,6 +58,21 @@ class RuntimeConfig(ArgusModel):
     listen_port: int = Field(default=8080, ge=1, le=65535)
     max_body_bytes: int = Field(default=1_048_576, ge=1024, le=50_000_000)
     request_timeout_seconds: float = Field(default=30.0, gt=0.0, le=600.0)
+    allow_buffered_streaming: bool = False
+    forward_headers: list[str] = Field(
+        default_factory=lambda: [
+            "accept",
+            "authorization",
+            "content-type",
+            "x-request-id",
+            "x-api-key",
+            "api-key",
+            "anthropic-version",
+            "anthropic-beta",
+            "openai-organization",
+            "openai-project",
+        ]
+    )
     approval_header: str = "X-Argus-Approval-Token"
     approval_token_env: str = "ARGUS_RUNTIME_APPROVAL_TOKEN"
     audit_path: str = "./runtime-audit/events.jsonl"
