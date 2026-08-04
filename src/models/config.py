@@ -46,7 +46,7 @@ class TargetConfig(ConfigModel):
 
 
 class ReportingConfig(ConfigModel):
-    formats: list[str] = Field(default_factory=lambda: ["json", "markdown"])
+    formats: list[str] = Field(default_factory=lambda: ["json", "markdown", "sarif"])
     output_dir: str = "./reports"
     fail_on: str = "HIGH"
 
@@ -54,7 +54,7 @@ class ReportingConfig(ConfigModel):
     @classmethod
     def supported_formats(cls, value: list[str]) -> list[str]:
         normalized = [item.lower() for item in value]
-        invalid = set(normalized) - {"json", "markdown"}
+        invalid = set(normalized) - {"json", "markdown", "sarif"}
         if invalid:
             raise ValueError(f"unsupported report formats: {sorted(invalid)}")
         return normalized

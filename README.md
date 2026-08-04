@@ -15,13 +15,16 @@ an IAM system, sandbox, SIEM, or universal guarantee of safety.
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements.lock
 .venv/bin/pip install -e .
+.venv/bin/argus doctor
 .venv/bin/argus audit --target ./config --output ./reports/first-run
 ```
 
 Open `reports/first-run/report.md`. `PASS` means no configured rule crossed the
 gate; `BLOCK` means review is required; `ERROR` means the check did not finish.
+The lock file gives repeatable installs; use `requirements.txt` when you want
+the flexible lower-bound dependency path.
 
 For the complete proof-of-concept, use [POC.md](POC.md). For the architecture,
 code walkthrough, decisions, tradeoffs, interview preparation, and limits, use
@@ -31,6 +34,7 @@ code walkthrough, decisions, tradeoffs, interview preparation, and limits, use
 
 | Goal | Command | Network/process behavior |
 | --- | --- | --- |
+| Check the local setup | `argus doctor` | Read-only checks; does not contact a model or MCP server |
 | Review a repository, config, MCP definitions, or skills | `argus audit --target PATH` | Static; launches nothing |
 | Test an authorized live LLM endpoint | `argus audit --target PATH --endpoint URL ...` | Bounded behavior probes |
 | Inspect a live MCP server | `argus mcp-probe --transport ... --confirm-live` | `initialize` + paginated `tools/list`; zero tool calls |
@@ -60,7 +64,8 @@ Use a profile when business context changes the risk:
   --output ./reports/banking-agent
 ```
 
-Reports are `report.json` and `report.md`. `audit` and `scan` are aliases. The
+Reports are `report.json`, `report.md`, and `report.sarif`. SARIF can be uploaded
+to GitHub Code Scanning. `audit` and `scan` are aliases. The
 editable install exposes `argus` and `argus-runtime`; the `python argus.py`
 form remains available when running directly from a clone.
 
@@ -170,15 +175,26 @@ acceptance procedure is in [POC.md](POC.md).
 | Evidence | Recorded result |
 | --- | --- |
 | Installable CLI | Editable package install succeeded; `argus` and `argus-runtime` help commands work |
-| Automated quality gate | 53 tests passed; Black, Flake8, mypy, and schema checks passed |
-| Real agent tooling | Claude Code, Codex CLI, and Gemini CLI configuration files were scanned |
+| Automated quality gate | 58 tests passed; Black, Flake8, mypy, and schema checks passed |
+| SARIF export | GitHub-compatible `report.sarif` with stable rule IDs, locations, severity, and fingerprints |
+| Current deployment smoke | Claude global settings `BLOCK` on 1 CRITICAL credential finding; Claude local/Codex/Gemini configs `PASS`; empty Gemini MCP registry `ERROR` |
 | Real MCP server | Official pinned filesystem server: 14 tools, 1 page, 0 tool calls, 2 HIGH findings, `BLOCK` |
+| Performance smoke run | Static: 4 files in 0.016s; real MCP discovery: 14 tools in 1.834s warm or 70.794s cold with `npx` startup |
 | Runtime POC | The repository CI/Compose workflow is configured to verify health, `403` prompt blocking, forwarding, metrics, and sanitized audit events |
 
 The real MCP evidence is documented in [WORKFLOW.md](WORKFLOW.md#661-real-world-verification-run).
-The reports to retain as proof are `report.md`, `report.json`, and
+The reports to retain as proof are `report.md`, `report.json`, and `report.sarif`, plus
 `runtime-audit/events.jsonl`. Record the OS, Python/Node versions, package
 versions, command, timestamp, and whether each endpoint was mock or real.
+
+For GitHub Code Scanning, upload the generated SARIF artifact from CI:
+
+```yaml
+- uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: reports/first-run/report.sarif
+```
 
 <details>
 <summary>Captured real Argus run — 2026-08-04</summary>

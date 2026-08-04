@@ -1,9 +1,12 @@
 """Structured parser and rule-routing regressions."""
 
 import json
+import asyncio
 from pathlib import Path
 
 from src.core.documents import parse_file
+from src.core.engine import ArgusEngine
+from src.core.config import load_config
 from src.core.ingress import ingest_local
 from src.models import FileRecord
 from src.modules.scanners.mcp_scanner import MCPScanner
@@ -56,3 +59,16 @@ def test_ingress_keeps_equivalent_structured_values(tmp_path: Path) -> None:
     document = context.documents["agent.json"]
     assert document.value == payload
     assert context.document_errors == []
+
+
+def test_document_parse_errors_are_not_reported_as_pass(tmp_path: Path) -> None:
+    empty = tmp_path / "mcp_config.json"
+    empty.write_text("", encoding="utf-8")
+    context = ingest_local(str(empty))
+    config = load_config().model_copy(update={"attacks": []})
+
+    result = asyncio.run(ArgusEngine(config).run(context))
+
+    assert result["summary"]["decision"] == "ERROR"
+    assert result["summary"]["error_count"] >= 1
+    assert result["summary"]["errors"]

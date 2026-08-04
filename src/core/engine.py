@@ -239,7 +239,8 @@ class ArgusEngine:
             for item in attack_results
         )
         dynamic_errors = sum(bool(item.error) for item in attack_results)
-        decision = "ERROR" if dynamic_errors else "BLOCK" if blocked else "PASS"
+        execution_errors = [*context.document_errors, *self._errors]
+        decision = "ERROR" if dynamic_errors or execution_errors else "BLOCK" if blocked else "PASS"
         return {
             "metadata": {
                 "schema_version": "1.0",
@@ -263,7 +264,8 @@ class ArgusEngine:
                     + [item.risk_score for item in attack_results]
                     + [0.0]
                 ),
-                "errors": [*context.document_errors, *self._errors],
+                "errors": execution_errors,
+                "error_count": len(execution_errors) + dynamic_errors,
                 "dynamic_error_count": dynamic_errors,
                 "fail_on": self.config.reporting.fail_on,
                 "decision": decision,

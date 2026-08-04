@@ -24,8 +24,9 @@ Create the environment from the repository root:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements.lock
 .venv/bin/pip install -e .
+.venv/bin/argus doctor
 mkdir -p reports/poc poc-mcp-root
 ```
 
@@ -42,6 +43,7 @@ This step is safe: it reads files and starts no agent, model, or MCP server.
 Acceptance check:
 
 - `reports/poc/static/report.md` exists;
+- `reports/poc/static/report.sarif` is valid SARIF 2.1.0;
 - the report contains a decision, findings, and remediation;
 - `report.json` is valid JSON.
 
@@ -172,9 +174,11 @@ Keep these files or CI artifacts:
 ```text
 reports/poc/static/report.md
 reports/poc/static/report.json
+reports/poc/static/report.sarif
 reports/poc/mock-llm/report.md
 reports/poc/real-mcp/report.md
 reports/poc/real-mcp/report.json
+reports/poc/real-mcp/report.sarif
 runtime-audit/events.jsonl
 ```
 

@@ -103,7 +103,7 @@ CLI arguments
     │
     ├── validate the ScanReport and generated JSON contracts
     │
-    ├── write report.json and report.md
+    ├── write report.json, report.md, and report.sarif
     │
     └── return an exit code for a human or CI system
 ```
@@ -116,6 +116,7 @@ The main orchestration is in `argus.py` and `src/core/engine.py`.
 | --- | --- |
 | `argus.py` | CLI parser, scan lifecycle, report writing, exit codes |
 | `pyproject.toml` | Installable package metadata, CLI entrypoints, and bundled defaults |
+| `requirements.lock` | Exact verified dependency graph for repeatable CI/local installs |
 | `POC.md` | Copy-paste proof-of-concept run and acceptance evidence |
 | `config/default_config.yaml` | Default engine, report, judge, vault, scanner, and attack settings |
 | `config/profiles/` | Explicit deployment-context profiles |
@@ -131,6 +132,7 @@ The main orchestration is in `argus.py` and `src/core/engine.py`.
 | `src/modules/scanners/mcp_scanner.py` | Deterministic agent, MCP server, and tool-permission rules |
 | `src/modules/attacks/` | Versioned attack modules and dataset loading |
 | `src/runtime/` | Runtime proxy, policy enforcement, audit writer, and metrics |
+| `src/core/doctor.py` | Secret-free environment diagnostics for first-time users |
 | `runtime_gateway.py` | Runtime gateway entry point for local or Compose execution |
 | `docker-compose.runtime.yml` | Portable runtime-only deployment for a real upstream |
 | `docker-compose.production.yml`, `Caddyfile` | TLS edge and scalable replica deployment baseline |
@@ -138,7 +140,7 @@ The main orchestration is in `argus.py` and `src/core/engine.py`.
 | `src/core/registry.py` | Deterministic built-in module registration and selection |
 | `src/models/domain.py` | Pydantic source-of-truth domain models |
 | `src/models/*.json` | Generated JSON Schema artifacts |
-| `src/reporting/` | JSON and Markdown report generation |
+| `src/reporting/` | JSON, Markdown, and SARIF report generation |
 | `src/core/sanitization.py` | Secret redaction and untrusted-output cleanup |
 | `src/utils/crypto.py` | Optional AES-256-GCM vault utility |
 | `src/utils/validators.py` | Reusable score, path, and JSON Schema validation helpers |
@@ -210,9 +212,22 @@ Argus requires Python 3.11 or newer. The repository uses a virtual environment s
 ```bash
 cd PROJECT-ARGUS
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements.lock
 .venv/bin/pip install -e .
 ```
+
+`requirements.lock` pins the verified direct and transitive dependency graph.
+Use `requirements.txt` instead when you deliberately want flexible lower
+bounds. Run the environment check before the first scan:
+
+```bash
+.venv/bin/argus doctor
+```
+
+Doctor checks Python, Node/npm, Docker/Compose, optional provider variables,
+MCP transport support, and the report directory. Missing optional tools are
+warnings; `--strict` turns those warnings into a failing CI check. `--json`
+produces secret-free machine-readable output.
 
 Run a static scan:
 
@@ -244,6 +259,16 @@ Useful options:
 --fail-on LEVEL      LOW, MEDIUM, HIGH, or CRITICAL
 --verbose            Enable diagnostic logging
 ```
+
+Every default scan also writes `report.sarif`. It maps Argus rule IDs to SARIF
+results with GitHub-compatible severity, relative file locations, remediation,
+risk properties, and stable fingerprints. The SARIF file contains findings and
+unsafe/error dynamic results, never raw model responses or credentials.
+
+The report summary records bounded performance data. For a static scan it
+includes files, ingest time, evaluation time, and total seconds. For MCP
+discovery it includes tool count and total probe seconds. These are measurements
+from the current host, not universal benchmarks.
 
 ## 6. Real-time dynamic testing
 
@@ -620,24 +645,40 @@ surface needs review; it does not mean the probe executed the dangerous tool.
 
 ### 6.6.1 Real-world verification run
 
-This evidence was collected on 2026-08-04 using installed agent CLIs and the
-official MCP filesystem server, not the repository mock endpoint. The real MCP
-probe was rerun from merged `main` at commit `38ca0a7`:
+This evidence was collected on 2026-08-04 against the current local AI-tool
+configuration files and the official MCP filesystem server, not the repository
+mock endpoint. Credentials, session databases, chat history, and secret values
+were intentionally excluded from the scan targets and evidence:
 
 | Test | What was scanned or contacted | Result |
 | --- | --- | --- |
-| Claude Code 2.1.199 | `$HOME/.claude/settings.local.json` | PASS; 0 findings |
+| Claude Code 2.1.199 global settings | `$HOME/.claude/settings.json` | BLOCK; 1 CRITICAL hardcoded-credential finding; the secret value was not recorded |
+| Claude Code 2.1.199 local settings | `$HOME/.claude/settings.local.json` | PASS; 0 findings |
 | Codex CLI 0.146.0 | `$HOME/.codex/config.toml` | PASS; 0 findings and no MCP declarations in this file |
-| Gemini CLI 0.49.0 | `$HOME/.gemini/config/config.json` and `config/mcp_config.json` | PASS; 0 findings and no MCP declarations in those files |
-| Official MCP server 2026.7.10 | `mcp-probe` launched `@modelcontextprotocol/server-filesystem` over stdio with one temporary directory as its only allowed root | 14 tools discovered, 1 page read, 0 tool calls; Argus returned BLOCK for 2 HIGH findings |
+| Gemini CLI 0.49.0 | `$HOME/.gemini/config/config.json` | PASS; 0 findings |
+| Gemini MCP registry | `$HOME/.gemini/config/mcp_config.json` | ERROR; file is empty, so Argus correctly refused to call it safe |
+| OpenClaw | `$HOME/.openclaw` | Not installed in this environment; no result claimed |
+| Official MCP server 2026.7.10 | Installed `argus mcp-probe` launched `@modelcontextprotocol/server-filesystem` over stdio with one temporary directory as its only allowed root | 14 tools, 1 page, 0 tool calls; 1.834s warm / 70.794s cold `npx`; Argus returned BLOCK for 2 HIGH findings |
 
 The reproducible static commands were:
 
 ```bash
-.venv/bin/python argus.py audit --target "$HOME/.claude/settings.local.json" --output ./reports/real-claude
-.venv/bin/python argus.py audit --target "$HOME/.codex/config.toml" --output ./reports/real-codex
-.venv/bin/python argus.py audit --target "$HOME/.gemini/config/mcp_config.json" --output ./reports/real-gemini-mcp
+.venv/bin/argus audit --target "$HOME/.claude/settings.local.json" --output ./reports/real-claude
+.venv/bin/argus audit --target "$HOME/.claude/settings.json" --output ./reports/real-claude-global
+.venv/bin/argus audit --target "$HOME/.codex/config.toml" --output ./reports/real-codex
+.venv/bin/argus audit --target "$HOME/.gemini/config/config.json" --output ./reports/real-gemini-config
+.venv/bin/argus audit --target "$HOME/.gemini/config/mcp_config.json" --output ./reports/real-gemini-mcp
 ```
+
+The current local reports were written to `/tmp/argus-installed-*` during the
+verification run. Retain the generated `report.json`, `report.md`, and
+`report.sarif` artifacts when repeating this on another machine. The empty
+Gemini MCP file demonstrates an important gate: malformed or incomplete
+configuration is `ERROR` with a non-zero exit code, never a false `PASS`.
+
+The cold MCP timing includes the first `npx` package startup/download. A warm
+run is the better estimate for repeated CI checks; keep the longer timeout for
+first-run installation or preinstall the pinned server package.
 
 The MCP runtime check used the official package at a fixed version, sent only
 the MCP `initialize` and paginated `tools/list` requests, and kept the
@@ -682,6 +723,11 @@ filesystem server was reachable and its tool inventory was real, while Argus
 identified two controls the host should add before exposing those tools to an
 agent. The report also lists all 14 names so an operator can compare the live
 surface with the reviewed configuration.
+
+The local configuration scan is intentionally a posture check, not a claim
+that Argus attached to a running CLI. It proves what the selected deployment
+files declare; live traffic and MCP tool calls still need an authorized
+endpoint probe or the runtime gateway.
 
 ### What this evidence proves—and what it does not
 
@@ -1030,7 +1076,7 @@ engine:
 judge:
   backend: NullJudgeBackend
 reporting:
-  formats: [json, markdown]
+  formats: [json, markdown, sarif]
   fail_on: HIGH
 attacks: [prompt_injection, jailbreak, data_extraction]
 target:
@@ -1047,7 +1093,7 @@ Important configuration knobs:
 | `engine.rate_limit_rps` | Token-bucket request rate | Match the target's approved rate limit |
 | `engine.timeout_seconds` | Per-request timeout | Increase only for intentionally slow models |
 | `engine.max_retries` | Retry count for transient failures | Keep bounded so a broken endpoint cannot hang CI |
-| `reporting.formats` | `json`, `markdown`, or both | Keep JSON for automation and Markdown for review |
+| `reporting.formats` | `json`, `markdown`, `sarif`, or any combination | Keep JSON/Markdown for review and SARIF for Code Scanning |
 | `reporting.fail_on` | Default CI severity gate | Use `HIGH` for a strict deployment gate |
 | `judge.backend` | Null, mock, or HTTP judge selection | Keep `NullJudgeBackend` for deterministic private scans |
 | `judge.endpoint` | Optional semantic-judge URL | Required when using `HTTPJudgeBackend` |
@@ -1401,7 +1447,7 @@ For every decision, say both halves. For example: “We chose a local null judge
 The Dockerfile:
 
 1. starts from `python:3.11-slim`;
-2. installs `requirements.txt`;
+2. installs the reproducible `requirements.lock`;
 3. copies the repository into `/app`;
 4. creates `.vault` and `reports` directories;
 5. uses `python argus.py` as the image entrypoint.
@@ -1451,10 +1497,11 @@ docker compose down
 7. run the test suite;
 8. verify generated JSON Schemas;
 9. start the local mock and run an integration scan;
-10. build the Docker image;
-11. validate both the repository demo Compose file and the reusable runtime Compose file;
-12. start `mock` and the runtime gateway, then test health, request blocking, forwarding, and metrics;
-13. start the full Compose deployment and require the Argus service to exit successfully.
+10. upload the generated SARIF report as a CI artifact;
+11. build the Docker image;
+12. validate both the repository demo Compose file and the reusable runtime Compose file;
+13. start `mock` and the runtime gateway, then test health, request blocking, forwarding, and metrics;
+14. start the full Compose deployment and require the Argus service to exit successfully.
 
 The mock integration command uses:
 
@@ -1463,7 +1510,7 @@ python argus.py scan \
   --target config \
   --endpoint http://127.0.0.1:8765/v1/messages \
   --fail-on CRITICAL \
-  --output /tmp/argus-reports
+  --output reports/ci
 ```
 
 The threshold is deliberate: CI proves that the dynamic pipeline runs and writes a report, while the mock's known high-risk response is still visible in that report. The final Compose smoke test proves that the image entrypoint, service network, health check, environment endpoint, report mount, and one-shot exit status work together.
@@ -1888,6 +1935,9 @@ Before an interview, you should be able to do all of these without opening anoth
 - explain why the default judge is null and why the HTTP judge is optional;
 - explain how the target output is sanitized;
 - explain how retries and rate limits protect the target;
+- run `argus doctor` and explain which missing tools are warnings versus blockers;
+- inspect `report.sarif` and explain how GitHub Code Scanning consumes it;
+- quote the measured static and MCP timings while stating that they are host-specific;
 - name at least three tests and what each proves;
 - explain the Docker mock entrypoint and health check;
 - start the runtime gateway, trigger a `403` policy block, and inspect `/metrics` and the audit JSONL;

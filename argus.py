@@ -10,9 +10,11 @@ import argparse
 import asyncio
 import os
 import sys
+from time import perf_counter
 from pathlib import Path
 
 from src.core.config import ConfigurationError, load_config
+from src.core.doctor import run_doctor
 from src.core.engine import ArgusEngine
 from src.core.ingress import IngressError, ingest
 from src.core.mcp_probe import (
@@ -25,7 +27,7 @@ from src.core.mcp_probe import (
     probe_summary,
 )
 from src.models.config import TargetConfig
-from src.reporting import JSONExporter, MarkdownExporter
+from src.reporting import JSONExporter, MarkdownExporter, SARIFExporter
 from src.utils.logger import configure_logging
 
 EXIT_OK = 0
@@ -40,6 +42,18 @@ def build_parser() -> argparse.ArgumentParser:
         prog="argus", description="Argus — local-first AI security evaluation framework"
     )
     subparsers = parser.add_subparsers(dest="command")
+    doctor_parser = subparsers.add_parser(
+        "doctor", help="Check the local environment before scanning or probing"
+    )
+    doctor_parser.add_argument(
+        "--report-dir", default="./reports", help="Directory where reports will be written"
+    )
+    doctor_parser.add_argument(
+        "--strict", action="store_true", help="Treat optional dependency warnings as failures"
+    )
+    doctor_parser.add_argument(
+        "--json", action="store_true", dest="as_json", help="Print machine-readable JSON"
+    )
     scan_parser = subparsers.add_parser(
         "scan",
         aliases=["audit"],
@@ -149,10 +163,14 @@ def _write_reports(results: dict, config, output: str | None) -> list[Path]:
         written.append(JSONExporter().export(results, output_dir / "report.json"))
     if "markdown" in formats:
         written.append(MarkdownExporter().export(results, output_dir / "report.md"))
+    if "sarif" in formats:
+        written.append(SARIFExporter().export(results, output_dir / "report.sarif"))
     return written
 
 
 def _exit_for_results(results: dict, fail_on: str) -> int:
+    if results.get("summary", {}).get("decision") == "ERROR":
+        return EXIT_ERROR
     threshold = _SEVERITY_ORDER[fail_on]
     for finding in results.get("findings", []):
         if _SEVERITY_ORDER.get(str(finding.get("severity", "LOW")), 0) >= threshold:
@@ -238,12 +256,22 @@ def _print_summary(
         print("[Argus] Live probes: not run (no --endpoint or ARGUS_TARGET_ENDPOINT)")
     if errors:
         print(f"[Argus] Execution notes: {len(errors)}")
+    performance = summary.get("performance")
+    if isinstance(performance, dict):
+        elapsed = performance.get("elapsed_seconds")
+        details = f"{elapsed:.3f}s" if isinstance(elapsed, (int, float)) else "unknown"
+        if performance.get("files_scanned") is not None:
+            details += f"; files: {performance['files_scanned']}"
+        if performance.get("tool_count") is not None:
+            details += f"; tools: {performance['tool_count']}"
+        print(f"[Argus] Performance: {details}")
     for path in written:
         print(f"[Argus] Report written: {path}")
 
 
 def run_scan(args: argparse.Namespace) -> int:
     configure_logging(bool(getattr(args, "verbose", False)))
+    operation_started = perf_counter()
     config = load_config(profile=args.profile, config_path=args.config)
     config = _apply_target_options(config, args)
     if args.fail_on:
@@ -252,11 +280,22 @@ def run_scan(args: argparse.Namespace) -> int:
     if args.endpoint:
         config = config.model_copy(update={"target_endpoint": args.endpoint})
     effective_endpoint = args.endpoint or config.target_endpoint
+    ingest_started = perf_counter()
     context = ingest(args.target, max_file_size=config.engine.max_file_size_bytes)
+    ingest_seconds = perf_counter() - ingest_started
     context = context.model_copy(
         update={"profile": config.profile, "target_endpoint": effective_endpoint}
     )
+    evaluation_started = perf_counter()
     results = asyncio.run(ArgusEngine(config).run(context))
+    evaluation_seconds = perf_counter() - evaluation_started
+    results["summary"]["performance"] = {
+        "operation": "scan",
+        "files_scanned": len(context.files),
+        "ingest_seconds": round(ingest_seconds, 3),
+        "evaluation_seconds": round(evaluation_seconds, 3),
+        "elapsed_seconds": round(perf_counter() - operation_started, 3),
+    }
     written = _write_reports(results, config, args.output)
     fail_on = args.fail_on or config.reporting.fail_on
     exit_code = _exit_for_results(results, fail_on)
@@ -288,7 +327,11 @@ def _mcp_probe_server_metadata(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _run_mcp_probe_report(
-    args: argparse.Namespace, config, result=None, error: str | None = None
+    args: argparse.Namespace,
+    config,
+    result=None,
+    error: str | None = None,
+    elapsed_seconds: float | None = None,
 ) -> tuple[list[Path], dict]:
     if result is None:
         context = build_probe_context(
@@ -311,6 +354,14 @@ def _run_mcp_probe_report(
     ]
     if result is not None:
         results["summary"]["mcp_probe"] = probe_summary(result, args.server_name)
+        if elapsed_seconds is not None:
+            results["summary"]["mcp_probe"]["elapsed_seconds"] = round(elapsed_seconds, 3)
+    if elapsed_seconds is not None:
+        results["summary"]["performance"] = {
+            "operation": "mcp-probe",
+            "elapsed_seconds": round(elapsed_seconds, 3),
+            "tool_count": len(result.tools) if result is not None else 0,
+        }
     if error:
         results["summary"].setdefault("errors", []).append(error)
         results["summary"]["decision"] = "ERROR"
@@ -337,6 +388,7 @@ def run_mcp_probe(args: argparse.Namespace) -> int:
         max_response_bytes=args.max_response_bytes,
         max_tool_bytes=args.max_tool_bytes,
     )
+    operation_started = perf_counter()
     try:
         if args.transport == "stdio":
             if not args.mcp_command:
@@ -360,10 +412,15 @@ def run_mcp_probe(args: argparse.Namespace) -> int:
                     limits=limits,
                 )
             )
-        written, results = _run_mcp_probe_report(args, config, result=result)
+        written, results = _run_mcp_probe_report(
+            args, config, result=result, elapsed_seconds=perf_counter() - operation_started
+        )
     except MCPProbeError as exc:
         written, results = _run_mcp_probe_report(
-            args, config, error=f"mcp probe failed: {type(exc).__name__}"
+            args,
+            config,
+            error=f"mcp probe failed: {type(exc).__name__}",
+            elapsed_seconds=perf_counter() - operation_started,
         )
         print(f"[Argus] MCP probe failed: {type(exc).__name__}", file=sys.stderr)
         for path in written:
@@ -377,6 +434,11 @@ def run_mcp_probe(args: argparse.Namespace) -> int:
         f"{results['summary'].get('mcp_probe', {}).get('tool_count', 0)}"
     )
     print("[Argus] Tool calls: 0 (read-only discovery)")
+    performance = results["summary"].get("performance")
+    if isinstance(performance, dict) and isinstance(
+        performance.get("elapsed_seconds"), (int, float)
+    ):
+        print(f"[Argus] Performance: {performance['elapsed_seconds']:.3f}s")
     if decision == "ERROR":
         return EXIT_ERROR
     for path in written:
@@ -391,6 +453,8 @@ def main(argv: list[str] | None = None) -> int:
         runner = run_scan
     elif args.command == "mcp-probe":
         runner = run_mcp_probe
+    elif args.command == "doctor":
+        return run_doctor(args.report_dir, strict=args.strict, as_json=args.as_json)
     else:
         parser.print_help()
         return EXIT_USAGE

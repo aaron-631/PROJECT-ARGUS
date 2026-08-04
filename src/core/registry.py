@@ -83,7 +83,7 @@ def discover_builtin_modules() -> None:
         MockJudgeBackend,
         NullJudgeBackend,
     )
-    from src.reporting.exporters import JSONExporter, MarkdownExporter
+    from src.reporting.exporters import JSONExporter, MarkdownExporter, SARIFExporter
 
     builtins = [
         ("attack_modules", DataExtractionModule, BaseAttackModule, "module_id"),
@@ -96,6 +96,7 @@ def discover_builtin_modules() -> None:
         ("judges", APIJudgeBackend, JudgeBackend, "backend_id"),
         ("exporters", JSONExporter, BaseExporter, "exporter_id"),
         ("exporters", MarkdownExporter, BaseExporter, "exporter_id"),
+        ("exporters", SARIFExporter, BaseExporter, "exporter_id"),
     ]
     for group, cls, interface, identity in builtins:
         module_id = getattr(cls, identity)

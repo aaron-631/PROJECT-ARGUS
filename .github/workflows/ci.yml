@@ -10,10 +10,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.lock
       - run: pip install --no-build-isolation --no-deps -e .
       - run: argus --help
       - run: argus-runtime --help
+      - run: argus doctor --json
       - run: black --check --target-version py311 src/ tests/ argus.py runtime_gateway.py
       - run: flake8 src/ tests/ argus.py runtime_gateway.py
       - run: mypy src/
@@ -27,7 +28,14 @@ jobs:
           server_pid=$!
           trap 'kill "$server_pid"' EXIT
           sleep 1
-          python argus.py scan --target config --endpoint http://127.0.0.1:8765/v1/messages --fail-on CRITICAL --output /tmp/argus-reports
+          python argus.py scan --target config --endpoint http://127.0.0.1:8765/v1/messages --fail-on CRITICAL --output reports/ci
+      - name: Upload SARIF evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: argus-sarif-report
+          path: reports/ci/report.sarif
+          if-no-files-found: ignore
       - name: Build Docker image
         run: docker build -t argus-ci .
       - name: Validate Docker Compose

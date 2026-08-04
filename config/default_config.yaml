@@ -14,7 +14,7 @@ judge:
   backend: "NullJudgeBackend"  # Default: no external calls
 
 reporting:
-  formats: ["json", "markdown"]
+  formats: ["json", "markdown", "sarif"]
   output_dir: "./reports"
   fail_on: "HIGH"
 
