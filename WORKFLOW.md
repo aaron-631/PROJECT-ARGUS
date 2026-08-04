@@ -620,15 +620,15 @@ surface needs review; it does not mean the probe executed the dangerous tool.
 
 ### 6.6.1 Real-world verification run
 
-This is the evidence from `feature/argus-runtime-gateway`, run on 2026-08-04. It uses
-installed agent CLIs and the official MCP filesystem server, not the repository
-mock endpoint:
+This evidence was collected on 2026-08-04 using installed agent CLIs and the
+official MCP filesystem server, not the repository mock endpoint. The real MCP
+probe was rerun from merged `main` at commit `38ca0a7`:
 
 | Test | What was scanned or contacted | Result |
 | --- | --- | --- |
-| Claude Code 2.1.199 | `$HOME/.claude/settings.local.json` | PASS at the default HIGH gate; one MEDIUM HTTP-endpoint finding |
-| Codex CLI 0.146.0 | `$HOME/.codex/config.toml` | PASS; no findings and no MCP declarations in this file |
-| Gemini CLI 0.49.0 | `$HOME/.gemini/config/config.json` and `config/mcp_config.json` | PASS; no findings and no MCP declarations in those files |
+| Claude Code 2.1.199 | `$HOME/.claude/settings.local.json` | PASS; 0 findings |
+| Codex CLI 0.146.0 | `$HOME/.codex/config.toml` | PASS; 0 findings and no MCP declarations in this file |
+| Gemini CLI 0.49.0 | `$HOME/.gemini/config/config.json` and `config/mcp_config.json` | PASS; 0 findings and no MCP declarations in those files |
 | Official MCP server 2026.7.10 | `mcp-probe` launched `@modelcontextprotocol/server-filesystem` over stdio with one temporary directory as its only allowed root | 14 tools discovered, 1 page read, 0 tool calls; Argus returned BLOCK for 2 HIGH findings |
 
 The reproducible static commands were:
@@ -645,7 +645,7 @@ server's allowed root under `/tmp`. It did not call `write_file`, `edit_file`,
 or any other side-effecting tool. The reproducible command was:
 
 ```bash
-.venv/bin/python argus.py mcp-probe --transport stdio \
+.venv/bin/argus mcp-probe --transport stdio \
   --command npx --arg=-y \
   --arg=@modelcontextprotocol/server-filesystem@2026.7.10 \
   --arg=/tmp/argus-real-mcp-root --timeout 120 \

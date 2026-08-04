@@ -160,7 +160,7 @@ Run the short POC from the repository root:
 
 ```bash
 mkdir -p reports/poc
-.venv/bin/python argus.py audit --target ./config --output ./reports/poc/static
+.venv/bin/argus audit --target ./config --output ./reports/poc/static
 ```
 
 Then run the real MCP command from [Inspect a live MCP server](#inspect-a-live-mcp-server)
@@ -184,20 +184,20 @@ versions, command, timestamp, and whether each endpoint was mock or real.
 <summary>Captured real Argus run — 2026-08-04</summary>
 
 Environment: Linux workspace, Python 3.14.4, Node.js v24.15.0, npm 11.16.0,
-branch `feature/argus-runtime-gateway`, commit `982f85e`.
+merged `main`, commit `38ca0a7`.
 
 ```text
-$ .venv/bin/python argus.py mcp-probe \
+$ .venv/bin/argus mcp-probe \
     --transport stdio --command npx --arg=-y \
     --arg=@modelcontextprotocol/server-filesystem@2026.7.10 \
     --arg=/tmp/argus-real-mcp-root --server-name official-filesystem \
-    --timeout 120 --confirm-live --output /tmp/argus-proof-mcp
+    --timeout 120 --confirm-live --output /tmp/argus-main-real-mcp
 
 [Argus] Decision: BLOCK
 [Argus] MCP transport: stdio; tools discovered: 14
 [Argus] Tool calls: 0 (read-only discovery)
-[Argus] Report written: /tmp/argus-proof-mcp/report.json
-[Argus] Report written: /tmp/argus-proof-mcp/report.md
+[Argus] Report written: /tmp/argus-main-real-mcp/report.json
+[Argus] Report written: /tmp/argus-main-real-mcp/report.md
 shell_status:10
 ```
 
