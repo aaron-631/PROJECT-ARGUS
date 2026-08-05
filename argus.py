@@ -18,6 +18,7 @@ from src.core.baseline import apply_baseline
 from src.core.doctor import run_doctor
 from src.core.engine import ArgusEngine
 from src.core.ingress import IngressError, ingest
+from src.core.sanitization import sanitize
 from src.core.mcp_probe import (
     MCPProbeError,
     MCPProbeLimits,
@@ -27,6 +28,7 @@ from src.core.mcp_probe import (
     probe_streamable_http,
     probe_summary,
 )
+from src.models import SEVERITY_ORDER
 from src.models.config import TargetConfig
 from src.reporting import JSONExporter, MarkdownExporter, SARIFExporter
 from src.utils.logger import configure_logging
@@ -35,13 +37,24 @@ EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_FINDINGS = 10
 EXIT_ERROR = 1
-_SEVERITY_ORDER = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+
+
+def _package_version() -> str:
+    """Read the installed version so the CLI can never drift from pyproject."""
+
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("argus-framework")
+    except PackageNotFoundError:
+        return "0.0.0+unknown"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="argus", description="Argus — local-first AI security evaluation framework"
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {_package_version()}")
     subparsers = parser.add_subparsers(dest="command")
     doctor_parser = subparsers.add_parser(
         "doctor", help="Check the local environment before scanning or probing"
@@ -63,6 +76,27 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--target", required=True, help="Local path or Git URL")
     scan_parser.add_argument("--profile", default="default", help="Configuration profile name")
     scan_parser.add_argument("--output", default=None, help="Report output directory")
+    scan_parser.add_argument(
+        "--format",
+        dest="formats",
+        action="append",
+        default=None,
+        choices=["json", "markdown", "sarif"],
+        help="Report format to generate (repeatable; default: all configured formats)",
+    )
+    scan_parser.add_argument(
+        "--disable-rule",
+        action="append",
+        default=[],
+        metavar="RULE_ID",
+        help="Suppress a specific rule (repeatable, e.g. --disable-rule ARGUS_ST_003)",
+    )
+    scan_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="Print machine-readable JSON summary to stdout",
+    )
     scan_parser.add_argument(
         "--baseline",
         default=None,
@@ -148,6 +182,21 @@ def build_parser() -> argparse.ArgumentParser:
     probe_parser.add_argument("--profile", default="default", help="Configuration profile name")
     probe_parser.add_argument("--output", default=None, help="Report output directory")
     probe_parser.add_argument(
+        "--format",
+        dest="formats",
+        action="append",
+        default=None,
+        choices=["json", "markdown", "sarif"],
+        help="Report format to generate (repeatable; default: all configured formats)",
+    )
+    probe_parser.add_argument(
+        "--disable-rule",
+        action="append",
+        default=[],
+        metavar="RULE_ID",
+        help="Suppress a specific rule (repeatable, e.g. --disable-rule ARGUS_ST_003)",
+    )
+    probe_parser.add_argument(
         "--baseline",
         default=None,
         help="Compare with a previous report.json and fail only on new regressions",
@@ -162,6 +211,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Confirm that launching/contacting this MCP server is authorized",
     )
     probe_parser.add_argument("--verbose", action="store_true", help="Enable diagnostic logging")
+
+    rules_parser = subparsers.add_parser("rules", help="List all available security rules")
+    rules_parser.add_argument(
+        "--verbose", action="store_true", help="Show full descriptions and remediation"
+    )
     return parser
 
 
@@ -190,16 +244,16 @@ def _exit_for_results(results: dict, fail_on: str) -> int:
             return EXIT_ERROR
         if baseline.get("gate") == "PASS":
             return EXIT_OK
-    threshold = _SEVERITY_ORDER[fail_on]
+    threshold = SEVERITY_ORDER[fail_on]
     for finding in results.get("findings", []):
-        if _SEVERITY_ORDER.get(str(finding.get("severity", "LOW")), 0) >= threshold:
+        if SEVERITY_ORDER.get(str(finding.get("severity", "LOW")), 0) >= threshold:
             return EXIT_FINDINGS
     for attack in results.get("attack_results", []):
         if attack.get("error"):
             return EXIT_ERROR
         if (
             attack.get("canonical_result", {}).get("attack_succeeded")
-            and threshold <= _SEVERITY_ORDER["HIGH"]
+            and threshold <= SEVERITY_ORDER["HIGH"]
         ):
             return EXIT_FINDINGS
     return EXIT_OK
@@ -302,6 +356,13 @@ def run_scan(args: argparse.Namespace) -> int:
     operation_started = perf_counter()
     config = load_config(profile=args.profile, config_path=args.config)
     config = _apply_target_options(config, args)
+    if args.formats:
+        reporting = config.reporting.model_copy(update={"formats": args.formats})
+        config = config.model_copy(update={"reporting": reporting})
+    if args.disable_rule:
+        existing = list(getattr(config, "disabled_rules", []))
+        existing.extend(args.disable_rule)
+        config = config.model_copy(update={"disabled_rules": existing})
     if args.fail_on:
         reporting = config.reporting.model_copy(update={"fail_on": args.fail_on})
         config = config.model_copy(update={"reporting": reporting})
@@ -329,7 +390,12 @@ def run_scan(args: argparse.Namespace) -> int:
     written = _write_reports(results, config, args.output)
     fail_on = args.fail_on or config.reporting.fail_on
     exit_code = _exit_for_results(results, fail_on)
-    _print_summary(results, written, exit_code, effective_endpoint)
+    if getattr(args, "as_json", False):
+        import json
+
+        print(json.dumps(results.get("summary", {}), indent=2))
+    else:
+        _print_summary(results, written, exit_code, effective_endpoint)
     return exit_code
 
 
@@ -408,6 +474,13 @@ def run_mcp_probe(args: argparse.Namespace) -> int:
             "mcp-probe requires --confirm-live because it starts or contacts a live MCP server"
         )
     config = load_config(profile=args.profile, config_path=args.config)
+    if args.formats:
+        reporting = config.reporting.model_copy(update={"formats": args.formats})
+        config = config.model_copy(update={"reporting": reporting})
+    if args.disable_rule:
+        existing = list(getattr(config, "disabled_rules", []))
+        existing.extend(args.disable_rule)
+        config = config.model_copy(update={"disabled_rules": existing})
     if args.fail_on:
         reporting = config.reporting.model_copy(update={"fail_on": args.fail_on})
         config = config.model_copy(update={"reporting": reporting})
@@ -448,13 +521,14 @@ def run_mcp_probe(args: argparse.Namespace) -> int:
             args, config, result=result, elapsed_seconds=perf_counter() - operation_started
         )
     except MCPProbeError as exc:
+        detail = sanitize(str(exc))
         written, results = _run_mcp_probe_report(
             args,
             config,
-            error=f"mcp probe failed: {type(exc).__name__}",
+            error=f"mcp probe failed: {type(exc).__name__}: {detail}",
             elapsed_seconds=perf_counter() - operation_started,
         )
-        print(f"[Argus] MCP probe failed: {type(exc).__name__}", file=sys.stderr)
+        print(f"[Argus] MCP probe failed: {type(exc).__name__}: {detail}", file=sys.stderr)
         for path in written:
             print(f"[Argus] Report written: {path}")
         return EXIT_ERROR
@@ -478,11 +552,26 @@ def run_mcp_probe(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def run_rules(args: argparse.Namespace) -> int:
+    from src.modules.scanners.mcp_scanner import _RULES
+
+    for rule_id, (severity, title, description, _score, remediation) in sorted(_RULES.items()):
+        sev = severity.value if hasattr(severity, "value") else str(severity)
+        print(f"{rule_id} [{sev}] {title}")
+        if args.verbose:
+            print(f"  {description}")
+            print(f"  Fix: {remediation}")
+            print()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command in {"scan", "audit"}:
         runner = run_scan
+    elif args.command == "rules":
+        return run_rules(args)
     elif args.command == "mcp-probe":
         runner = run_mcp_probe
     elif args.command == "doctor":
