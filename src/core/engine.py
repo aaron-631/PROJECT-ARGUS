@@ -8,8 +8,8 @@ from typing import Any
 
 from src.core.evaluation import EvaluationPipeline
 from src.core.rate_limiter import TokenBucketRateLimiter, parse_retry_after
-from src.core.sanitization import sanitize_value
-from src.core.registry import get_enabled_modules
+from src.core.sanitization import sanitize, sanitize_value
+from src.core.registry import get_enabled_modules, plugin_errors
 from src.core.target_client import HTTPTargetClient, TargetClient, resolve_api_key
 from src.interfaces.judge import HTTPJudgeBackend, MockJudgeBackend, NullJudgeBackend
 from src.models import SEVERITY_ORDER, AttackResult, Finding, ScanContext
@@ -59,7 +59,10 @@ class ArgusEngine:
             except Exception as exc:
                 # A plugin failure is represented as no finding; callers still
                 # get a complete report and can inspect the engine error list.
-                self._errors.append(f"scanner {scanner_id}: {type(exc).__name__}")
+                # The cause is included because "ValidationError" alone leaves a
+                # plugin author with nothing to act on.
+                detail = sanitize(" ".join(str(exc).split()))[:300]
+                self._errors.append(f"scanner {scanner_id}: {type(exc).__name__}: {detail}")
         disabled = set(getattr(self.config, "disabled_rules", []))
         if disabled:
             self._suppressed_rules = sorted({f.rule_id for f in findings if f.rule_id in disabled})
@@ -244,7 +247,7 @@ class ArgusEngine:
             for item in attack_results
         )
         dynamic_errors = sum(bool(item.error) for item in attack_results)
-        execution_errors = [*context.document_errors, *self._errors]
+        execution_errors = [*context.document_errors, *self._errors, *plugin_errors()]
         decision = "ERROR" if dynamic_errors or execution_errors else "BLOCK" if blocked else "PASS"
         return {
             "metadata": {

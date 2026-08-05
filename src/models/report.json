@@ -154,7 +154,7 @@
           "type": "number"
         },
         "rule_id": {
-          "pattern": "^ARGUS_ST_[0-9]{3}$",
+          "pattern": "^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$",
           "title": "Rule Id",
           "type": "string"
         },

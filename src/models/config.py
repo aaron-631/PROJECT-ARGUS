@@ -78,7 +78,8 @@ class ArgusConfig(ConfigModel):
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
     vault: VaultConfig = Field(default_factory=VaultConfig)
     target: TargetConfig = Field(default_factory=TargetConfig)
-    scanners: list[str] = Field(default_factory=lambda: ["mcp_scanner"])
+    # Empty selects every registered scanner, including entry-point plugins.
+    scanners: list[str] = Field(default_factory=list)
     attacks: list[str] = Field(
         default_factory=lambda: ["prompt_injection", "jailbreak", "data_extraction"]
     )

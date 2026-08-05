@@ -15,13 +15,23 @@ _registry: dict = {
 }
 
 
+_plugin_errors: list[str] = []
+
+
 class RegistryError(ValueError):
     """Raised when a module violates the registry contract."""
+
+
+def plugin_errors() -> list[str]:
+    """Entry-point plugins that failed to load, so a scan never hides them."""
+
+    return list(_plugin_errors)
 
 
 def clear_registry() -> None:
     for group in _registry.values():
         group.clear()
+    _plugin_errors.clear()
 
 
 def _register(group: str, cls: type[Any], interface: type[Any], identity: str) -> type[Any]:
@@ -124,10 +134,29 @@ def discover_builtin_modules() -> None:
                     module_id = getattr(cls, identity, None)
                     if module_id and module_id not in _registry[registry_group]:
                         _register(registry_group, cls, interface, identity)
-                except Exception:
-                    pass  # External plugin failed to load; continue
+                except Exception as exc:
+                    # One broken plugin must not abort the scan, but it must not
+                    # be invisible either: a silently missing scanner turns a
+                    # partial scan into an apparently clean one.
+                    message = f"plugin {ep.name} ({group}): {type(exc).__name__}: {exc}"
+                    if message not in _plugin_errors:
+                        _plugin_errors.append(message)
     except ImportError:
         pass
+
+
+def _selected_scanners(requested: Any, available: dict[str, type[Any]]) -> set[str]:
+    """Resolve the scanner selection, where empty or absent means every scanner.
+
+    Defaulting to "all" is what lets a pip-installed plugin run without editing
+    the shipped config; an explicit non-empty list still restricts the run.
+    Attack modules keep the opposite default because live probing is opt-in:
+    an empty attack list means "probe nothing".
+    """
+
+    if not isinstance(requested, (list, tuple, set)) or not requested:
+        return set(available)
+    return {str(item) for item in requested}
 
 
 def get_enabled_modules(config: dict | Any) -> dict[str, dict[str, type[Any]]]:
@@ -136,10 +165,15 @@ def get_enabled_modules(config: dict | Any) -> dict[str, dict[str, type[Any]]]:
     toggles = (
         raw.get("enabled_modules", {}) if isinstance(raw.get("enabled_modules", {}), dict) else {}
     )
+    requested_attacks = toggles.get("attack_modules", raw.get("attacks"))
     enabled = {
-        "scanners": set(toggles.get("scanners", raw.get("scanners", _registry["scanners"]))),
-        "attack_modules": set(
-            toggles.get("attack_modules", raw.get("attacks", _registry["attack_modules"]))
+        "scanners": _selected_scanners(
+            toggles.get("scanners", raw.get("scanners")), _registry["scanners"]
+        ),
+        "attack_modules": (
+            set(_registry["attack_modules"])
+            if requested_attacks is None
+            else {str(item) for item in requested_attacks}
         ),
     }
     disabled = raw.get("disabled_modules", [])
@@ -172,6 +206,7 @@ __all__ = [
     "discover_builtin_modules",
     "get_enabled_modules",
     "get_registry",
+    "plugin_errors",
     "register_attack_module",
     "register_exporter",
     "register_judge",

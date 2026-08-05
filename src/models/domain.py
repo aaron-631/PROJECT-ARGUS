@@ -7,6 +7,7 @@ being slightly inconvenient for an extension author.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
@@ -91,7 +92,10 @@ class ScanContext(ArgusModel):
 
 
 class Finding(ArgusModel):
-    rule_id: str = Field(pattern=r"^ARGUS_ST_[0-9]{3}$")
+    # Built-in rules use ARGUS_ST_NNN. Plugins must use their own prefix: the
+    # ARGUS_ namespace is reserved so a third-party finding can never be
+    # mistaken for a first-party one when a report is reviewed or audited.
+    rule_id: str = Field(pattern=r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$")
     severity: Severity
     title: str = Field(min_length=1)
     description: str = Field(min_length=1)
@@ -104,6 +108,18 @@ class Finding(ArgusModel):
     risk_score: float = Field(default=0.0, ge=0.0, le=10.0)
     evaluation_methodology: str = "deterministic_static"
     remediation: str = ""
+
+    @field_validator("rule_id")
+    @classmethod
+    def reserve_builtin_namespace(cls, value: str) -> str:
+        """Keep ARGUS_ for built-ins so plugin findings stay distinguishable."""
+
+        if value.startswith("ARGUS_") and not re.fullmatch(r"ARGUS_ST_[0-9]{3}", value):
+            raise ValueError(
+                "the ARGUS_ prefix is reserved for built-in rules; "
+                "use your own prefix (for example ACME_ST_001)"
+            )
+        return value
 
 
 class AttackProbe(ArgusModel):
