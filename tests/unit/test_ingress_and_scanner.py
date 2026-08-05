@@ -129,3 +129,106 @@ def test_locally_shadowed_names_are_not_flagged(tmp_path: Path) -> None:
     )
 
     assert _scan_calls(tmp_path) == []
+
+
+def _rule_ids(tmp_path: Path, **kwargs: object) -> list[str]:
+    from src.modules.scanners.mcp_scanner import MCPScanner
+
+    context = ingest_local(str(tmp_path), **kwargs)  # type: ignore[arg-type]
+    return sorted(item.rule_id for item in MCPScanner().scan(context))
+
+
+def test_policy_deny_list_is_not_reported_as_destructive(tmp_path: Path) -> None:
+    """A block-list is a control; reporting it inverts its meaning."""
+
+    (tmp_path / "policy.yaml").write_text(
+        'policy:\n  block_tools:\n    - "delete*"\n    - "drop*"\n', encoding="utf-8"
+    )
+    (tmp_path / "policy.json").write_text(
+        '{"policy": {"block_tools": ["delete_user", "drop_table"]}}', encoding="utf-8"
+    )
+
+    found = _rule_ids(tmp_path)
+
+    assert "ARGUS_ST_004" not in found
+    assert "ARGUS_ST_006" not in found
+
+
+def test_destructive_tool_is_still_reported_in_yaml_and_json(tmp_path: Path) -> None:
+    """Equivalent YAML and JSON must reach the same verdict."""
+
+    (tmp_path / "yaml_tool.yaml").write_text(
+        "tools:\n  - name: delete_user\n    description: removes a user\n", encoding="utf-8"
+    )
+    (tmp_path / "json_tool.json").write_text(
+        '{"tools": [{"name": "delete_user", "description": "removes a user"}]}',
+        encoding="utf-8",
+    )
+
+    from src.modules.scanners.mcp_scanner import MCPScanner
+
+    findings = MCPScanner().scan(ingest_local(str(tmp_path)))
+    flagged = {
+        item.source_file for item in findings if item.rule_id in {"ARGUS_ST_004", "ARGUS_ST_006"}
+    }
+
+    assert flagged == {"yaml_tool.yaml", "json_tool.json"}
+
+
+def test_generated_reports_are_not_rescanned_as_configuration(tmp_path: Path) -> None:
+    """Ingesting a prior report re-reports its quoted evidence as live config."""
+
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    (tmp_path / "mcp.json").write_text('{"mcpServers": {"a": {"command": "npx"}}}', "utf-8")
+    (reports / "report.json").write_text(
+        json.dumps({"metadata": {"argus_version": "1.0.0"}, "findings": []}), encoding="utf-8"
+    )
+    (reports / "report.sarif").write_text(
+        json.dumps({"runs": [{"tool": {"driver": {"name": "Argus"}}}]}), encoding="utf-8"
+    )
+    (reports / "report.md").write_text("# Argus Security Evaluation Report\n", encoding="utf-8")
+
+    context = ingest_local(str(tmp_path))
+
+    assert "mcp.json" in context.files
+    assert context.skipped_files == [
+        "reports/report.json",
+        "reports/report.md",
+        "reports/report.sarif",
+    ]
+
+
+def test_unrelated_reports_directory_is_still_scanned(tmp_path: Path) -> None:
+    """Only Argus's own output is skipped, never a project's real data."""
+
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    (reports / "data.json").write_text(
+        json.dumps({"metadata": {"team": "analytics"}, "rows": [1, 2]}), encoding="utf-8"
+    )
+
+    context = ingest_local(str(tmp_path))
+
+    assert "reports/data.json" in context.files
+    assert context.skipped_files == []
+
+
+def test_exclude_skips_directories_and_globs(tmp_path: Path) -> None:
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "vendor" / "bad.py").write_text('import os\nos.system("x")\n', encoding="utf-8")
+    (tmp_path / "keep.py").write_text('import os\nos.system("x")\n', encoding="utf-8")
+
+    assert "vendor/bad.py" not in ingest_local(str(tmp_path), exclude=("vendor",)).files
+    assert "keep.py" in ingest_local(str(tmp_path), exclude=("vendor",)).files
+    assert ingest_local(str(tmp_path), exclude=("*.py",)).files == {}
+
+
+def test_unscannable_single_file_target_is_an_error(tmp_path: Path) -> None:
+    """A skipped lone target must not be reported as a clean scan."""
+
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"metadata": {"argus_version": "1.0.0"}}), encoding="utf-8")
+
+    with pytest.raises(IngressError):
+        ingest_local(str(report))

@@ -59,3 +59,58 @@ def test_disabled_rule_is_suppressed_and_recorded(tmp_path: Path) -> None:
     # Suppression must leave an audit trail, otherwise a scan with critical
     # rules disabled is indistinguishable from a genuinely clean one.
     assert suppressed["summary"]["suppressed_rules"] == ["ARGUS_ST_003"]
+
+
+def test_plugin_scanners_run_without_editing_shipped_config() -> None:
+    """An installed plugin that never runs is worse than one that errors."""
+
+    from src.core.registry import get_enabled_modules, get_registry
+
+    config = load_config(profile="default")
+    enabled = get_enabled_modules(config)["scanners"]
+
+    assert set(enabled) == set(get_registry()["scanners"])
+    assert "mcp_scanner" in enabled
+
+
+def test_explicit_scanner_list_still_restricts() -> None:
+    from src.core.registry import get_enabled_modules
+
+    config = load_config(profile="default").model_copy(update={"scanners": ["mcp_scanner"]})
+
+    assert list(get_enabled_modules(config)["scanners"]) == ["mcp_scanner"]
+
+
+def test_empty_attack_list_still_means_no_attacks() -> None:
+    """Live probing stays opt-in: empty must not be read as "all"."""
+
+    from src.core.registry import get_enabled_modules
+
+    config = load_config(profile="default").model_copy(update={"attacks": []})
+
+    assert get_enabled_modules(config)["attack_modules"] == {}
+
+
+def test_plugin_rule_ids_are_allowed_but_argus_prefix_is_reserved() -> None:
+    from pydantic import ValidationError
+
+    from src.models import Finding, Severity
+
+    finding = Finding(
+        rule_id="ACME_ST_001",
+        severity=Severity.HIGH,
+        title="t",
+        description="d",
+        confidence_score=0.5,
+    )
+    assert finding.rule_id == "ACME_ST_001"
+
+    for reserved in ("ARGUS_FOO", "ARGUS_CUSTOM_1", "ARGUS_ST_9999"):
+        with pytest.raises(ValidationError):
+            Finding(
+                rule_id=reserved,
+                severity=Severity.HIGH,
+                title="t",
+                description="d",
+                confidence_score=0.5,
+            )
