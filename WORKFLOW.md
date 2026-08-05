@@ -272,6 +272,7 @@ Useful options:
 --baseline PATH      Compare with a previous report.json and gate regressions
 --format FORMAT      json, markdown, or sarif; repeatable, default writes all
 --disable-rule ID    Suppress one rule; repeatable, recorded in the report
+--exclude PATTERN    Skip a directory name or glob under the target; repeatable
 --json               Print the summary as JSON on stdout for CI consumption
 --verbose            Enable diagnostic logging
 ```
@@ -1161,12 +1162,25 @@ Local ingestion:
   than dropping the file;
 - skips known binary extensions, NUL bytes, and non-UTF-8 content, recording
   each skipped path in `summary.skipped_files`;
+- skips Argus's own generated reports, also recording them in
+  `summary.skipped_files`;
+- honors `--exclude` for directory names and globs relative to the target;
 - stores relative paths, file size, language, and SHA-256.
 
-The distinction between the last two matters. A binary file is not analyzable,
-so skipping it and naming it in the report is honest. An oversized file may
-well contain a finding, so silently dropping it would let an unscanned file be
-reported as a clean pass; that case raises instead.
+The distinction between the last rules and the size rule matters. A binary file
+is not analyzable, so skipping it and naming it in the report is honest. An
+oversized file may well contain a finding, so silently dropping it would let an
+unscanned file be reported as a clean pass; that case raises instead. When the
+scan target is a single file that cannot be read, that also raises rather than
+returning an empty `PASS`, since a clean report over zero files is
+indistinguishable from a clean report over real ones.
+
+Skipping previous reports is a correctness fix, not an optimization. A report
+quotes the evidence it found, so ingesting one re-reports that evidence as
+though it were live configuration: scanning the same directory three times grew
+the count 15 → 24 → 25 with no code change. Detection parses the file and looks
+for Argus's own metadata rather than matching a directory called `reports`, so a
+project's genuine `reports/` data is still scanned.
 
 Git ingestion:
 
@@ -1592,8 +1606,8 @@ Test ownership by file:
 
 | Test file | What it protects |
 | --- | --- |
-| `test_ingress_and_scanner.py` | Safe ingestion, binary-skip reporting, oversized-file rejection, import-alias call detection, and the original 15 static rules |
-| `test_cli_features.py` | `--version`, `rules`, `--json`, `--format`, and the rule-suppression audit trail |
+| `test_ingress_and_scanner.py` | Safe ingestion, binary-skip reporting, oversized-file rejection, import-alias call detection, report self-ingestion, `--exclude`, deny-list false positives, YAML/JSON parity, and the original 15 static rules |
+| `test_cli_features.py` | `--version`, `rules`, `--json`, `--format`, the rule-suppression audit trail, plugin scanner enablement, and reserved rule-ID namespacing |
 | `test_target_client_and_mcp.py` | Provider request contracts and MCP least-privilege findings |
 | `test_documents_and_capabilities.py` | Parser behavior and rule routing |
 | `test_dynamic_engine.py` | Injected target and canonical dynamic results |
@@ -1688,6 +1702,38 @@ Dynamic execution requires an explicit endpoint flag or environment variable. A 
 
 Rules declare their supported file types and analysis mode. Python rules use ASTs; structured files use parsed key paths; only text rules use patterns. The scanner also reports evidence and remediation so a human can review the match.
 
+A concrete example is worth more than the principle. `ARGUS_ST_004` (destructive
+database operation) originally matched its regex against
+`json.dumps(value)` — the serialized form of the whole mapping. That produced a
+false positive with the meaning exactly inverted: a runtime policy containing
+`block_tools: ["delete*", "drop*"]` was reported as a destructive tool, when that
+deny-list is the control *preventing* destructive calls. It also made verdicts
+depend on file format, because `\bdelete\b` matches the glob `delete*` but not
+the identifier `delete_user`, so equivalent YAML and JSON disagreed.
+
+The fix was to read the tool's own identity fields (`name`, `operation`, `sql`,
+`description`) instead of the serialized blob, normalize `_` and `-` to word
+boundaries so `delete_user` and `delete*` are treated alike, and skip values that
+sit under keys naming what a policy forbids. The lesson to state out loud: a
+detector must model *meaning*, not text, or it eventually reports the mitigation
+as the vulnerability.
+
+### “What stops a scan from silently under-reporting?”
+
+Three specific mechanisms, each added after a real failure:
+
+- **Skipped files are reported.** `summary.skipped_files` lists every file not
+  read, so a `PASS` can never be confused with full coverage.
+- **Argus never re-ingests its own reports.** Because a report quotes the evidence
+  it found, scanning a directory that contained a previous report re-reported
+  that evidence as live configuration — findings grew 15 → 24 → 25 across three
+  runs with no code change. Detection is structural (parse the JSON and look for
+  Argus's own metadata), not by directory name, so a project's real `reports/`
+  data is still scanned.
+- **A plugin that fails to load forces `ERROR`.** A silently missing scanner turns
+  a partial scan into an apparently clean one, which is the most dangerous
+  failure mode a security tool has.
+
 ### “What happens if a target returns 503 or 429?”
 
 The target client returns a normalized response, the engine retries within configured bounds, applies exponential backoff, honors `Retry-After`, and reports an error if retries are exhausted. It does not mark a network failure as a successful attack.
@@ -1763,11 +1809,20 @@ The Docker daemon must be running and the Compose plugin must be installed.
 Current limits:
 
 - static rules cover the defined patterns, not every framework or programming language;
+- unsafe-code rules (`ARGUS_ST_003`, `ARGUS_ST_007`) are built on Python's `ast`
+  module and therefore apply to `.py` files only. A shell injection written in
+  TypeScript or Go is not detected, though configuration, secret, and skill rules
+  still apply to those repositories. Argus is a config-and-Python gate, not a
+  general-purpose multi-language SAST tool;
 - dynamic tests use a small versioned payload set rather than a complete red-team corpus;
 - the live target adapters cover generic, OpenAI-compatible, Anthropic, and Ollama HTTP contracts; truly custom protocols still need an adapter;
 - the normal report intentionally omits raw model responses;
 - the V2 gateway can enforce the defined policies on traffic routed through it, but it does not automatically observe traffic that bypasses the gateway;
 - the gateway includes shared-token authentication and a Compose/Caddy replica topology, but not OIDC/mTLS, distributed coordination, dashboard/SIEM product integration, or multi-region failover;
+- `redact_personal_data` matches email addresses and Indian mobile numbers only;
+  other national phone formats, postal addresses, and government IDs pass
+  through, so it is a helpful reducer and not a complete DLP control. Secret-shaped
+  output is redacted separately and unconditionally;
 - remote audit shipping is retrying best-effort; local per-replica files remain necessary until the collector confirms durable acceptance;
 - `mcp-probe` enumerates paginated tools over stdio and Streamable HTTP, but legacy HTTP+SSE and custom MCP transports still need adapters;
 - token-by-token streaming is not supported; responses are buffered for inspection;
@@ -1775,7 +1830,9 @@ Current limits:
   variable reassignment or `getattr`; a determined author can still hide a call
   from static analysis;
 - custom exporters and judges are discovered by the registry but still need a
-  small wiring change before the CLI will select them;
+  small wiring change before the CLI will select them. Scanner and attack-module
+  plugins are fully wired: `scanners: []` in the default config means "every
+  registered scanner", so a `pip install`-ed scanner runs with no config edit;
 - the default semantic judge is disabled.
 
 Natural next steps would be a larger curated dataset, richer workflow schema support, legacy HTTP+SSE/custom MCP adapters, policy-aware tool-call replay, OIDC/mTLS integration, distributed coordination, and Prometheus/SIEM dashboards. These hardening steps are intentionally separate from the compact local demo.
@@ -1865,7 +1922,7 @@ class PlacementScanner(BaseStaticScanner):
                 continue
             findings.append(
                 Finding(
-                    rule_id="ARGUS_ST_016",
+                    rule_id="PLACEMENT_ST_001",
                     severity=Severity.MEDIUM,
                     title="Unapproved placement email domain",
                     description="The placement workflow sends data to a personal email domain.",
@@ -1882,8 +1939,16 @@ class PlacementScanner(BaseStaticScanner):
         return findings
 ```
 
+Two model constraints apply to every custom rule. `rule_id` must be
+`UPPER_SNAKE_CASE` and the `ARGUS_` prefix is **reserved** for built-in rules, so
+a reviewer can always tell a third-party finding from a first-party one.
+`confidence_score` is capped at `0.92`, because no deterministic static rule
+claims certainty and plugin findings must sit on the same honest scale.
+
 Inside this repository, import the class in `src/core/registry.py` so the
-decorator runs, then enable it in configuration:
+decorator runs. No configuration change is needed: the shipped
+`scanners: []` means "every registered scanner". Name scanners explicitly only
+when you want to *restrict* a run:
 
 ```yaml
 scanners: [mcp_scanner, placement_scanner]
@@ -1893,7 +1958,11 @@ From a separate package you do not touch this repository at all: publish the
 class under the `argus.scanners` entry-point group and Argus discovers it on
 startup. `docs/plugins.md` walks through that path.
 
-The `ARGUS_ST_016` ID would also require the model pattern and any capability contract to be extended. That extra work is intentional: report IDs and schemas are treated as stable contracts.
+Reusing a built-in `ARGUS_ST_*` ID is rejected by the model rather than silently
+accepted, and adding a genuinely new built-in rule requires updating its
+capability contract in `src/modules/scanners/rules.py` and regenerating the JSON
+Schemas. That extra work is intentional: report IDs and schemas are treated as
+stable contracts, because a downstream SARIF consumer keys on them.
 
 ### 18.2 Add an attack module
 

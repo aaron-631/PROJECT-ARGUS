@@ -69,6 +69,14 @@ Detailed guides: [static and dynamic testing](WORKFLOW.md#6-real-time-dynamic-te
 
 Argus checks source, JSON/YAML/TOML/Python, secrets, shell execution, MCP
 servers, tool schemas, permissions, egress, TLS, unpinned packages, and skills.
+
+**Language scope.** Configuration rules (JSON/YAML/TOML) and text/secret rules
+are language-agnostic. Code-execution rules (`ARGUS_ST_003`, `ARGUS_ST_007`) use
+Python's `ast` module and therefore apply to `.py` files only: a shell injection
+written in TypeScript or Go is **not** detected today, though a hardcoded
+credential in those files still is. Treat Argus as a config-and-Python gate, not
+a general-purpose SAST tool for every language.
+
 Use a profile when business context changes the risk:
 
 ```bash
@@ -89,6 +97,15 @@ dynamic probes. Resolved findings are recorded as progress. The full decision
 logic is in [WORKFLOW.md](WORKFLOW.md#baseline-diff-mode). Use the `--format`
 flag to control which reports are generated; it is repeatable and accepts
 `json`, `markdown`, or `sarif` (e.g. `--format json --format sarif`).
+
+Argus never re-ingests its own generated reports, so scanning a directory twice
+returns the same result instead of compounding findings; skipped files are listed
+in `summary["skipped_files"]`. Use `--exclude` (repeatable, accepts a directory
+name or glob) to leave out vendored or generated trees:
+
+```bash
+.venv/bin/argus audit --target . --exclude vendor --exclude '*.min.js'
+```
 
 ## Test a live LLM endpoint
 
@@ -177,8 +194,14 @@ docker compose --env-file .env.runtime -f docker-compose.runtime.yml up --build
 It can require client authentication, block prompt/tool policies, require
 approval, redact sensitive output, expose metrics, and write hash-chained audit
 events. It expects buffered JSON HTTP (`stream: false`) and is not, by itself,
-the complete public-internet TLS/identity boundary. See the [deployment and
-runtime guide](WORKFLOW.md#9-docker-and-deployment-workflow).
+the complete public-internet TLS/identity boundary.
+
+`redact_personal_data` currently covers email addresses and Indian mobile
+numbers; other national phone formats, postal addresses, and government IDs are
+not matched, so do not rely on it as a complete DLP control. Secret-shaped
+output (API keys, bearer tokens, JWTs, PEM blocks) is redacted independently of
+that setting. See the [deployment and runtime
+guide](WORKFLOW.md#9-docker-and-deployment-workflow).
 
 ## Proof of concept and evidence
 
@@ -196,7 +219,7 @@ acceptance procedure is in [POC.md](POC.md).
 | Evidence | Recorded result |
 | --- | --- |
 | Installable CLI | Editable package install succeeded; `argus` and `argus-runtime` help commands work |
-| Automated quality gate | 61 tests passed; Black, Flake8, mypy, and schema checks passed |
+| Automated quality gate | 80 tests passed; Black, Flake8, mypy, and schema checks passed |
 | SARIF export | GitHub-compatible `report.sarif` with stable rule IDs, locations, severity, and fingerprints |
 | Current deployment smoke | Claude global settings `BLOCK` on 1 CRITICAL credential finding; Claude local/Codex/Gemini configs `PASS`; empty Gemini MCP registry `ERROR` |
 | Real MCP server | Official pinned filesystem server: 14 tools, 1 page, 0 tool calls, 2 HIGH findings, `BLOCK` |

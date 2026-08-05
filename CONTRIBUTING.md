@@ -59,6 +59,11 @@ Built-in rules live in `src/modules/scanners/`. Adding one touches three places:
 4. Add a test under `tests/unit/` covering both a true positive and a case that
    must not fire. False positives erode trust as fast as false negatives.
 
+When matching structured configuration, test the tool's own identity fields
+rather than the serialized mapping. Matching `json.dumps(value)` once made a
+policy deny-list (`block_tools: ["delete*"]`) report as a destructive tool —
+a security control read as the vulnerability it prevents.
+
 Run `argus rules --verbose` to confirm the rule is listed.
 
 To add a rule without modifying this repository, ship a scanner plugin instead —

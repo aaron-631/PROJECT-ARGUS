@@ -47,11 +47,13 @@ asyncio.run(main())
 ```
 
 `ingest` accepts a local path or a Git URL. Call `ingest_local` or `ingest_git`
-directly to bypass the URL heuristic.
+directly to bypass the URL heuristic. Pass `exclude=("vendor", "*.min.js")` to
+skip directories or globs relative to the target. Argus's own generated reports
+are always skipped so a repeated scan cannot compound its own findings.
 
 ## Result structure
 
-`run()` returns five top-level keys:
+`run()` returns six top-level keys:
 
 | Key | Contents |
 | --- | --- |
@@ -59,6 +61,7 @@ directly to bypass the URL heuristic.
 | `configuration` | Effective configuration, secrets redacted |
 | `findings` | Static findings |
 | `attack_results` | Dynamic probe results (empty unless an endpoint is set) |
+| `evaluation_methodology` | How findings were judged (`canonical_only` by default) |
 | `summary` | Counts, decision, errors, performance |
 
 Findings use the fields on the `Finding` model: `rule_id`, `severity`, `title`,
@@ -74,7 +77,8 @@ Fields on `summary` worth knowing:
   that skipped files is not full coverage; check this before trusting a `PASS`.
 - `suppressed_rules` — rules silenced via `disabled_rules`, recorded so a
   suppressed scan is never indistinguishable from a clean one.
-- `errors` / `error_count` — parse failures and scanner crashes.
+- `errors` / `error_count` — parse failures, scanner crashes, and plugins that
+  failed to load. Any entry here forces `decision` to `ERROR`.
 
 ## Configuration
 

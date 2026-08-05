@@ -31,10 +31,21 @@ Test against the included vulnerable agent example:
 - **HIGH**: High-impact risk (e.g., broad environment variables).
 - **MEDIUM**: Warning or missing best practices.
 
+**What Argus reads.** Configuration (JSON/YAML/TOML), secrets, and skill files
+are checked regardless of language. Unsafe-code rules use Python's `ast`, so they
+apply to `.py` files only — a shell injection in TypeScript or Go is not caught
+today. `summary.skipped_files` lists anything not read, so a `PASS` is never
+mistaken for full coverage.
+
 ## Scan Your Own Project
 To scan your own local project or repository:
 ```bash
 .venv/bin/argus scan --target /path/to/your/agent
+```
+
+Skip vendored or generated trees with `--exclude` (repeatable):
+```bash
+.venv/bin/argus scan --target . --exclude vendor --exclude '*.min.js'
 ```
 
 ## Probe a Live MCP Server

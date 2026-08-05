@@ -40,11 +40,11 @@ class WildcardPermissionScanner(BaseStaticScanner):
             if '"permissions": "*"' in record.content:
                 findings.append(
                     Finding(
-                        rule_id="CUSTOM_ST_001",
+                        rule_id="ACME_ST_001",
                         severity=Severity.CRITICAL,
                         title="Wildcard permission grant",
                         description="Configuration grants unrestricted permissions.",
-                        confidence_score=1.0,
+                        confidence_score=0.92,
                         source_file=record.path,
                         remediation="Replace '*' with an explicit allow-list.",
                     )
@@ -56,8 +56,13 @@ class WildcardPermissionScanner(BaseStaticScanner):
 `confidence_score`. Use `context.iter_files()` to walk `FileRecord` objects
 (`path`, `content`, `size_bytes`, `sha256`, `language`).
 
-Prefix custom rule IDs with something other than `ARGUS_` so they stay
-distinguishable from built-in rules in reports.
+Two constraints are enforced by the model, so check them before publishing:
+
+- **`rule_id` must be `UPPER_SNAKE_CASE`, and the `ARGUS_` prefix is reserved**
+  for built-in rules. Use your own prefix (`ACME_ST_001`) so a reader can always
+  tell a third-party finding from a first-party one.
+- **`confidence_score` must be `<= 0.92`.** No deterministic static rule claims
+  certainty; the cap keeps plugin findings on the same honest scale as built-ins.
 
 ## Write an exporter
 
@@ -158,7 +163,13 @@ print(list(get_registry()["scanners"]))
 ```
 
 A plugin that raises on import is skipped so one bad package cannot take down a
-scan. If yours does not appear, import it directly to surface the error.
+scan, but the failure is recorded in `summary["errors"]` and the run reports
+`ERROR` — a missing scanner must never look like a clean result. If yours does
+not appear, read that list first.
+
+The shipped `config/default_config.yaml` sets `scanners: []`, which means "every
+registered scanner", so an installed plugin runs with no config edit. Naming
+scanners explicitly restricts the run to that list; `disabled_modules` drops one.
 
 ## Test your plugin
 
@@ -166,7 +177,7 @@ Custom rules can be suppressed like any built-in, and suppression is recorded in
 `summary["suppressed_rules"]`:
 
 ```bash
-argus scan --target ./examples/vulnerable-agent --disable-rule CUSTOM_ST_001
+argus scan --target ./examples/vulnerable-agent --disable-rule ACME_ST_001
 ```
 
 Add unit tests under `tests/` that build a `ScanContext` and assert on returned
