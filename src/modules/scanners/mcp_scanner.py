@@ -371,6 +371,65 @@ def _is_mcp_server_location(location: str) -> bool:
     )
 
 
+# Keys whose values name what a policy *forbids*. A deny-list is a control, so
+# matching destructive verbs inside one inverts its meaning and reports the
+# mitigation as the vulnerability.
+_POLICY_CONTROL_KEYS = frozenset(
+    {
+        "approval_tools",
+        "block_output_patterns",
+        "block_prompt_patterns",
+        "block_tools",
+        "blocked",
+        "blocked_operations",
+        "blocked_tools",
+        "denied",
+        "denied_tools",
+        "deny",
+        "deny_list",
+        "denylist",
+        "disallowed",
+        "disallowed_tools",
+        "forbidden",
+        "forbidden_tools",
+        "require_approval_for",
+        "restricted_tools",
+    }
+)
+
+
+def _is_policy_control_location(location: str) -> bool:
+    """True when a value sits under a key that lists what is forbidden."""
+
+    for token in location.lower().replace("-", "_").split("."):
+        if token.split("[", 1)[0] in _POLICY_CONTROL_KEYS:
+            return True
+    return False
+
+
+def _destructive_operation(value: dict[str, Any]) -> str | None:
+    """Find a destructive verb in a tool's own identity, not in the whole blob.
+
+    Scanning ``json.dumps(value)`` made any file that merely mentions "delete"
+    look like a destructive tool, so a deny-list scanned as a finding and the
+    same structure differed between YAML and JSON purely on glob punctuation.
+    """
+
+    for key in ("name", "id", "tool", "tool_name", "operation", "action", "method"):
+        candidate = value.get(key)
+        if isinstance(candidate, str):
+            match = _DESTRUCTIVE_RE.search(candidate.replace("_", " ").replace("-", " "))
+            if match:
+                return match.group(0).lower()
+    for key in ("description", "sql", "query", "statement"):
+        candidate = value.get(key)
+        if isinstance(candidate, str):
+            match = _DESTRUCTIVE_RE.search(candidate)
+            if match:
+                return match.group(0).lower()
+    return None
+
+
 @register_scanner
 class MCPScanner(BaseStaticScanner):
     scanner_id = "mcp_scanner"
@@ -987,7 +1046,11 @@ class MCPScanner(BaseStaticScanner):
                                     {"key_path": location + "." + key, "value": False},
                                     _line_for(raw, key),
                                 )
-                    destructive_match = _DESTRUCTIVE_RE.search(combined)  # noqa: E501
+                    destructive_match = (
+                        None
+                        if _is_policy_control_location(location)
+                        else _destructive_operation(value)
+                    )
                     if destructive_match and self._supports("ARGUS_ST_004", path, parsed_document):
                         approval = any(
                             str(key).lower()
@@ -1006,7 +1069,7 @@ class MCPScanner(BaseStaticScanner):
                                 path,
                                 {
                                     "tool": name,
-                                    "operation": destructive_match.group(0),
+                                    "operation": destructive_match,
                                 },
                                 _line_for(raw, name),
                             )
