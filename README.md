@@ -13,6 +13,8 @@ an IAM system, sandbox, SIEM, or universal guarantee of safety.
 
 ## Quick start
 
+For a 5-minute practical introduction, see the [Quick-Start Guide](docs/quickstart.md).
+
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.lock
@@ -50,6 +52,7 @@ explicitly authorized the pinned MCP demo server.
 | Test an authorized live LLM endpoint | `argus audit --target PATH --endpoint URL ...` | Bounded behavior probes |
 | Inspect a live MCP server | `argus mcp-probe --transport ... --confirm-live` | `initialize` + paginated `tools/list`; zero tool calls |
 | Protect deployed model traffic | `docker-compose.runtime.yml` | Runtime allow/block/redact gateway |
+| List available security rules | `argus rules` | View active rules; add `--verbose` for full descriptions |
 
 Detailed guides: [static and dynamic testing](WORKFLOW.md#6-real-time-dynamic-testing),
 [live MCP discovery](WORKFLOW.md#live-read-only-mcp-discovery),
@@ -83,7 +86,9 @@ form remains available when running directly from a clone.
 For an existing backlog, `--baseline report.json` keeps all current findings in
 the report but fails only on new findings, severity increases, or newly unsafe
 dynamic probes. Resolved findings are recorded as progress. The full decision
-logic is in [WORKFLOW.md](WORKFLOW.md#baseline-diff-mode).
+logic is in [WORKFLOW.md](WORKFLOW.md#baseline-diff-mode). Use the `--format`
+flag to control which reports are generated; it is repeatable and accepts
+`json`, `markdown`, or `sarif` (e.g. `--format json --format sarif`).
 
 ## Test a live LLM endpoint
 
@@ -270,6 +275,14 @@ servers, Streamable HTTP discovery, and provider-specific JSON HTTP model
 adapters. Legacy HTTP+SSE, custom MCP transports, live commercial LLM evidence,
 and every OS/proxy/server implementation require a target-environment smoke
 test. See the [full evidence boundary](WORKFLOW.md#what-this-evidence-provesand-what-it-does-not).
+
+## Library API
+
+Argus can be imported and executed programmatically in your own Python applications. For documentation on configuration, scanning, and custom results, see the [Library API Documentation](docs/library_api.md).
+
+## Plugins
+
+Argus is built with an extensible registry. You can create custom scanners, attack modules, and report formats. See the [Plugin Development Guide](docs/plugins.md) to learn how to add custom functionality.
 
 ## Development checks
 

@@ -1,0 +1,150 @@
+{
+  "attack_results": [],
+  "configuration": {
+    "attacks": [
+      "prompt_injection",
+      "jailbreak",
+      "data_extraction"
+    ],
+    "c_env": 0.5,
+    "dataset_version": "1.0.0",
+    "deployment_context": "human_in_loop",
+    "description": "",
+    "disabled_modules": [],
+    "disabled_rules": [],
+    "enabled_modules": {},
+    "engine": {
+      "backoff_base_seconds": 0.25,
+      "max_concurrent_attacks": 10,
+      "max_file_size_bytes": 1048576,
+      "max_retries": 3,
+      "rate_limit_rps": 5.0,
+      "timeout_seconds": 30.0
+    },
+    "judge": {
+      "api_key_env": null,
+      "backend": "NullJudgeBackend",
+      "endpoint": null,
+      "headers": {},
+      "model": null
+    },
+    "profile": "default",
+    "reporting": {
+      "fail_on": "HIGH",
+      "formats": [
+        "json"
+      ],
+      "output_dir": "./reports"
+    },
+    "scanners": [
+      "mcp_scanner"
+    ],
+    "target": {
+      "api_key_env": null,
+      "auth_header": null,
+      "header_env": {},
+      "headers": {},
+      "max_tokens": 512,
+      "model": null,
+      "provider": "generic",
+      "temperature": 0.0
+    },
+    "target_endpoint": null,
+    "vault": {
+      "enabled": true,
+      "vault_dir": ".vault"
+    },
+    "version": "1.0"
+  },
+  "evaluation_methodology": "canonical_only",
+  "findings": [
+    {
+      "base_score": 10.0,
+      "confidence_score": 0.92,
+      "deployment_context": "human_in_loop",
+      "description": "Dynamic evaluation or subprocess execution is reachable from scanned code without a verifiable strict argument boundary.",
+      "evaluation_methodology": "deterministic_static",
+      "evidence": {
+        "call": "subprocess.run",
+        "file": "core/doctor.py"
+      },
+      "line": 25,
+      "remediation": "Remove eval/exec; use an allowlisted operation map and fixed subprocess arguments.",
+      "risk_score": 4.6,
+      "rule_id": "ARGUS_ST_003",
+      "severity": "CRITICAL",
+      "source_file": "core/doctor.py",
+      "title": "Unsafe code execution"
+    },
+    {
+      "base_score": 10.0,
+      "confidence_score": 0.92,
+      "deployment_context": "human_in_loop",
+      "description": "Dynamic evaluation or subprocess execution is reachable from scanned code without a verifiable strict argument boundary.",
+      "evaluation_methodology": "deterministic_static",
+      "evidence": {
+        "call": "subprocess.run",
+        "file": "core/ingress.py"
+      },
+      "line": 194,
+      "remediation": "Remove eval/exec; use an allowlisted operation map and fixed subprocess arguments.",
+      "risk_score": 4.6,
+      "rule_id": "ARGUS_ST_003",
+      "severity": "CRITICAL",
+      "source_file": "core/ingress.py",
+      "title": "Unsafe code execution"
+    },
+    {
+      "base_score": 10.0,
+      "confidence_score": 0.92,
+      "deployment_context": "human_in_loop",
+      "description": "Dynamic evaluation or subprocess execution is reachable from scanned code without a verifiable strict argument boundary.",
+      "evaluation_methodology": "deterministic_static",
+      "evidence": {
+        "call": "subprocess.run",
+        "file": "core/ingress.py"
+      },
+      "line": 215,
+      "remediation": "Remove eval/exec; use an allowlisted operation map and fixed subprocess arguments.",
+      "risk_score": 4.6,
+      "rule_id": "ARGUS_ST_003",
+      "severity": "CRITICAL",
+      "source_file": "core/ingress.py",
+      "title": "Unsafe code execution"
+    }
+  ],
+  "metadata": {
+    "argus_version": "1.0.0",
+    "dataset_version": "1.0.0",
+    "profile": "default",
+    "scan_id": "067c79cbeba683b5",
+    "schema_version": "1.0",
+    "source": "./src",
+    "source_type": "local"
+  },
+  "summary": {
+    "attack_count": 0,
+    "critical_count": 3,
+    "decision": "BLOCK",
+    "dynamic_error_count": 0,
+    "error_count": 0,
+    "errors": [],
+    "fail_on": "HIGH",
+    "finding_count": 3,
+    "high_count": 0,
+    "max_risk": 4.6,
+    "mcp_servers": [],
+    "mcp_tools": [],
+    "performance": {
+      "elapsed_seconds": 0.177,
+      "evaluation_seconds": 0.085,
+      "files_scanned": 59,
+      "ingest_seconds": 0.09,
+      "operation": "scan"
+    },
+    "skills": [],
+    "skipped_file_count": 0,
+    "skipped_files": [],
+    "suppressed_rules": []
+  }
+}

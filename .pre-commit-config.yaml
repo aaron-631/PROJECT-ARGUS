@@ -1,0 +1,24 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: '24.4.2'
+    hooks:
+      - id: black
+        args: ['--target-version', 'py311']
+  - repo: https://github.com/PyCQA/flake8
+    rev: '7.1.0'
+    hooks:
+      - id: flake8
+  - repo: local
+    hooks:
+      # Scans src/ only: pointing this at the repo root would gate every commit
+      # on examples/vulnerable-agent, which is deliberately unsafe. The baseline
+      # holds three reviewed list-form git invocations, so the hook fails on new
+      # findings rather than on the existing accepted ones.
+      - id: argus-scan
+        name: Argus security scan (src)
+        entry: >-
+          .venv/bin/argus scan --target ./src --fail-on CRITICAL
+          --baseline .argus/src-baseline.json
+        language: system
+        pass_filenames: false
+        always_run: true

@@ -26,3 +26,23 @@ build/
 
 # OS
 .DS_Store
+
+# Binary artifacts
+*.pdf
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Windows NTFS alternate data streams
+*:Zone.Identifier
+
+# Temporary
+*.swp
+*.swo
+*~
+.mypy_cache/
+.pytest_cache/
+
+# Vendor install scripts fetched locally
+get-docker.sh
