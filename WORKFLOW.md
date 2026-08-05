@@ -30,6 +30,7 @@ problem → design → code path → security decision → tradeoff → test evi
 The practical command decision is:
 
 ```text
+what rules exist?          → argus rules [--verbose]
 files/config/skills?       → audit --target PATH
 live LLM HTTP endpoint?    → audit --target PATH --endpoint URL
 live MCP tool inventory?   → mcp-probe --transport ... --confirm-live
@@ -38,6 +39,12 @@ deployed traffic control?  → runtime_gateway.py / docker-compose.runtime.yml
 
 This keeps the fast path obvious: static review is the default, live network
 and process execution are explicit, and runtime blocking is a separate service.
+
+Companion documents, if you want a narrower entry point: `docs/quickstart.md`
+for a five-minute first scan, `docs/library_api.md` for using Argus from Python,
+`docs/plugins.md` for writing your own scanner or exporter, and `CONTRIBUTING.md`
+for adding a rule. This document remains the complete version; those are
+extracts of it.
 
 ## 1. The project in one sentence
 
@@ -138,7 +145,7 @@ The main orchestration is in `argus.py` and `src/core/engine.py`.
 | `docker-compose.runtime.yml` | Portable runtime-only deployment for a real upstream |
 | `docker-compose.production.yml`, `Caddyfile` | TLS edge and scalable replica deployment baseline |
 | `src/interfaces/` | Extension contracts for scanners, attacks, judges, and exporters |
-| `src/core/registry.py` | Deterministic built-in module registration and selection |
+| `src/core/registry.py` | Built-in module registration plus entry-point plugin discovery |
 | `src/models/domain.py` | Pydantic source-of-truth domain models |
 | `src/models/*.json` | Generated JSON Schema artifacts |
 | `src/reporting/` | JSON, Markdown, and SARIF report generation |
@@ -263,8 +270,16 @@ Useful options:
 --config PATH        Use another default YAML file
 --fail-on LEVEL      LOW, MEDIUM, HIGH, or CRITICAL
 --baseline PATH      Compare with a previous report.json and gate regressions
+--format FORMAT      json, markdown, or sarif; repeatable, default writes all
+--disable-rule ID    Suppress one rule; repeatable, recorded in the report
+--json               Print the summary as JSON on stdout for CI consumption
 --verbose            Enable diagnostic logging
 ```
+
+Two discovery commands sit alongside `scan`, `audit`, `mcp-probe`, and
+`doctor`. `argus rules` lists every rule with its severity, and
+`argus rules --verbose` adds the full description and remediation.
+`argus --version` reports the installed package version.
 
 ### Baseline diff mode
 
@@ -1138,12 +1153,20 @@ Important configuration knobs:
 
 Local ingestion:
 
-- ignores `.git`, `.hg`, `.svn`, `__pycache__`, `.venv`, and `node_modules`;
+- ignores VCS, cache, and build directories such as `.git`, `__pycache__`,
+  `.venv`, `node_modules`, `.mypy_cache`, `.pytest_cache`, `build`, and `dist`;
 - rejects a target that is itself a symlink;
 - checks that symlinks do not escape the scan root;
-- rejects files larger than `max_file_size_bytes`;
-- rejects known binary extensions, NUL bytes, and non-UTF-8 content;
+- rejects files larger than `max_file_size_bytes`, aborting the scan rather
+  than dropping the file;
+- skips known binary extensions, NUL bytes, and non-UTF-8 content, recording
+  each skipped path in `summary.skipped_files`;
 - stores relative paths, file size, language, and SHA-256.
+
+The distinction between the last two matters. A binary file is not analyzable,
+so skipping it and naming it in the report is honest. An oversized file may
+well contain a finding, so silently dropping it would let an unscanned file be
+reported as a clean pass; that case raises instead.
 
 Git ingestion:
 
@@ -1162,7 +1185,7 @@ The reason for these restrictions is not merely performance. Argus analyzes untr
 | File type | Representation | Why |
 | --- | --- | --- |
 | JSON/YAML/TOML | Native structured values | Rules can inspect key paths and values instead of fragile text matches |
-| Python | Python AST | Rules can distinguish `subprocess.run(["fixed", "args"])` from `subprocess.run(user_value)` |
+| Python | Python AST | Rules can distinguish `subprocess.run(["fixed", "args"])` from `subprocess.run(user_value)`, and resolve import aliases so `from os import system` is not missed |
 | Markdown/text/env/ini | Text | Pattern rules can inspect unstructured content |
 
 `src/modules/scanners/rules.py` declares a capability contract for each rule. A structured rule is not silently run against a Python file, and AST rules are not approximated with a regex over YAML.
@@ -1179,7 +1202,7 @@ The 27 canonical rules are:
 | --- | --- | --- |
 | `ARGUS_ST_001` | Wildcard filesystem access | CRITICAL |
 | `ARGUS_ST_002` | Tool input schema has no useful constraints | HIGH |
-| `ARGUS_ST_003` | Unsafe `eval`, `exec`, or unbounded subprocess execution | CRITICAL |
+| `ARGUS_ST_003` | Unsafe `eval`, `exec`, `os.system`, or unbounded subprocess execution | CRITICAL |
 | `ARGUS_ST_004` | Destructive database operation lacks approval | HIGH |
 | `ARGUS_ST_005` | Instructions blindly trust external or user input | MEDIUM |
 | `ARGUS_ST_006` | Destructive action lacks an approval gate | HIGH |
@@ -1362,7 +1385,14 @@ Reports contain:
 - static findings;
 - dynamic attack results;
 - summary counts and errors;
+- skipped files and suppressed rules;
 - evaluation methodology.
+
+Two summary fields exist so a clean report cannot overstate its coverage.
+`skipped_files` names every file that was not read, and `suppressed_rules`
+names every rule silenced through `--disable-rule` or `disabled_rules`. Without
+them a `PASS` from a partial or deliberately narrowed scan would be
+indistinguishable from a `PASS` over everything.
 
 The engine intentionally sets ordinary `AttackResult.raw_response` to an empty string. Raw model responses are untrusted and may contain secrets, so they are not copied into normal reports.
 
@@ -1562,7 +1592,8 @@ Test ownership by file:
 
 | Test file | What it protects |
 | --- | --- |
-| `test_ingress_and_scanner.py` | Safe ingestion and the original 15 static rules |
+| `test_ingress_and_scanner.py` | Safe ingestion, binary-skip reporting, oversized-file rejection, import-alias call detection, and the original 15 static rules |
+| `test_cli_features.py` | `--version`, `rules`, `--json`, `--format`, and the rule-suppression audit trail |
 | `test_target_client_and_mcp.py` | Provider request contracts and MCP least-privilege findings |
 | `test_documents_and_capabilities.py` | Parser behavior and rule routing |
 | `test_dynamic_engine.py` | Injected target and canonical dynamic results |
@@ -1572,6 +1603,9 @@ Test ownership by file:
 | `test_models_and_sanitization.py` | Bounds, secret redaction, and invisible content removal |
 | `test_crypto_and_reporting.py` | Vault behavior and deterministic report exports |
 | `test_risk_engine.py` | Formula boundaries and judge advisory behavior |
+| `test_baseline.py` | Baseline gating for new, escalated, and resolved findings |
+| `test_doctor_and_sarif.py` | Environment diagnostics and SARIF contract |
+| `test_mcp_probe.py` | Read-only MCP discovery, pagination limits, and probe errors |
 | `runtime/test_policy.py` | Placement prompt, tool, approval, email, secret, and PII policies |
 | `runtime/test_gateway.py` | HTTP forwarding/auth boundary, approval integration, audit shipping, pre-upstream blocking, and response redaction |
 
@@ -1633,6 +1667,8 @@ exit code can block CI
 ### Minute 5: Explain tradeoffs
 
 Mention local-first privacy, deterministic canonical scoring, optional semantic judging, bounded concurrency, hash-locked payloads, Pydantic contracts, and the fact that the runtime gateway is a separate V2 enforcement service with a deliberately small policy surface.
+
+One point is worth stating explicitly, because it is the kind of detail an interviewer remembers: a security tool must never overstate its coverage. Argus reports the files it skipped and the rules that were suppressed, so a `PASS` from a partial scan cannot be mistaken for a `PASS` over everything. A false sense of safety is worse than a missing feature.
 
 ## 13. Interview questions and strong answers
 
@@ -1697,6 +1733,15 @@ PYTHONPATH=. .venv/bin/python -m src.models.schema_generation
 PYTHONPATH=. .venv/bin/python -m src.models.schema_generation --check
 ```
 
+### The scan passed but I expected a finding
+
+Check `summary.skipped_file_count` and `summary.suppressed_rules` in
+`report.json` before trusting a `PASS`. A file that is binary or non-UTF-8 is
+skipped and named in `skipped_files`; a rule silenced by `--disable-rule` or a
+profile's `disabled_rules` is named in `suppressed_rules`. A scan that skipped
+files is not full coverage. If a file you expected to be read appears there,
+scan it directly to see why.
+
 ### A Git scan fails
 
 Confirm the URL is a supported Git URL and that the repository is accessible. Argus uses a shallow clone and does not execute repository hooks.
@@ -1726,6 +1771,11 @@ Current limits:
 - remote audit shipping is retrying best-effort; local per-replica files remain necessary until the collector confirms durable acceptance;
 - `mcp-probe` enumerates paginated tools over stdio and Streamable HTTP, but legacy HTTP+SSE and custom MCP transports still need adapters;
 - token-by-token streaming is not supported; responses are buffered for inspection;
+- AST call detection resolves import aliases, but not values reached through
+  variable reassignment or `getattr`; a determined author can still hide a call
+  from static analysis;
+- custom exporters and judges are discovered by the registry but still need a
+  small wiring change before the CLI will select them;
 - the default semantic judge is disabled.
 
 Natural next steps would be a larger curated dataset, richer workflow schema support, legacy HTTP+SSE/custom MCP adapters, policy-aware tool-call replay, OIDC/mTLS integration, distributed coordination, and Prometheus/SIEM dashboards. These hardening steps are intentionally separate from the compact local demo.
@@ -1782,13 +1832,13 @@ These are honest V1 limits, not hidden failures:
 | A hosted dashboard or multi-tenant service | Local-first operation keeps the security boundary small |
 | Guaranteed model safety | A finite payload set cannot prove safety against every future attack |
 | Automatic encryption of every report | Sanitized reports and the separate vault utility have different responsibilities |
-| Fully dynamic third-party plugin discovery | Explicit imports make the security tool deterministic |
+| Fully dynamic third-party plugin discovery | Scanners and attack modules load from entry points, but exporters and judges are still selected directly by the CLI |
 
 Say these limits confidently in an interview. A clear boundary is evidence of engineering judgment.
 
 ## 18. How to extend the project
 
-The extension interfaces are intentionally small. The registry validates inheritance, IDs, versions, and duplicate registrations. The current built-in discovery is explicit, so adding a module involves a small code change rather than silently loading arbitrary packages.
+The extension interfaces are intentionally small. The registry validates inheritance, IDs, versions, and duplicate registrations. Built-in modules are registered explicitly; third-party packages are discovered through the `argus.scanners`, `argus.attacks`, `argus.judges`, and `argus.exporters` entry-point groups, so extending Argus does not require forking it. A plugin that fails to import is skipped rather than aborting the scan. See `docs/plugins.md`.
 
 ### 18.1 Add a static scanner
 
@@ -1832,11 +1882,16 @@ class PlacementScanner(BaseStaticScanner):
         return findings
 ```
 
-For this repository, the implementation also needs to be imported and added to the built-in list in `src/core/registry.py`, then enabled in configuration:
+Inside this repository, import the class in `src/core/registry.py` so the
+decorator runs, then enable it in configuration:
 
 ```yaml
 scanners: [mcp_scanner, placement_scanner]
 ```
+
+From a separate package you do not touch this repository at all: publish the
+class under the `argus.scanners` entry-point group and Argus discovers it on
+startup. `docs/plugins.md` walks through that path.
 
 The `ARGUS_ST_016` ID would also require the model pattern and any capability contract to be extended. That extra work is intentional: report IDs and schemas are treated as stable contracts.
 
@@ -1897,9 +1952,9 @@ This is dependency injection: the engine does not need to know whether it is tal
 
 ### 18.4 Understand the current plugin boundary
 
-The registry has contracts for scanners, attacks, judges, and exporters. Built-in scanners and attacks participate directly in the engine configuration. The CLI currently selects the built-in JSON, Markdown, and SARIF exporters directly, and `_judge()` selects the built-in judge names directly. Therefore, a custom judge or exporter needs a small wiring change in `src/core/engine.py` or `argus.py`; registering a class alone does not make it selectable from YAML.
+The registry has contracts for scanners, attacks, judges, and exporters, and discovers third-party classes through entry points. Scanners and attack modules registered this way participate directly in the engine configuration. The CLI, however, still selects the built-in JSON, Markdown, and SARIF exporters directly, and `_judge()` selects the built-in judge names directly. Therefore, a custom judge or exporter is discovered by the registry but still needs a small wiring change in `src/core/engine.py` or `argus.py` before it can be selected from YAML.
 
-This is worth explaining in an interview because it shows that the architecture has extension points without pretending it already has a complete third-party plugin marketplace.
+This is worth explaining in an interview because it shows the architecture has real extension points, and that you know precisely where they stop.
 
 ## 19. Placement-ready project story
 
@@ -1972,6 +2027,8 @@ Before an interview, you should be able to do all of these without opening anoth
 - run `argus doctor` and explain which missing tools are warnings versus blockers;
 - run `python scripts/demo.py` and explain why its expected `BLOCK` is success evidence;
 - use `--baseline` and explain why existing findings remain visible but do not block regressions;
+- run `argus rules` and explain how a rule ID maps to a severity and a remediation;
+- explain why the report names skipped files and suppressed rules, and why a security tool must never overstate its coverage;
 - inspect `report.sarif` and explain how GitHub Code Scanning consumes it;
 - open `evidence/real-mcp/` and explain the provenance and redaction choices;
 - explain why compatibility and dependency-audit checks are separate from the Docker integration job;
