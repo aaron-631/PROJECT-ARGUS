@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import shutil
 import subprocess
 import tempfile
-from pathlib import Path
+from fnmatch import fnmatch
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 from src.models import FileRecord, ScanContext, SourceMetadata
@@ -98,6 +100,65 @@ def _language(path: str) -> str | None:
     }.get(suffix)
 
 
+# An Argus report quotes the evidence it found, so ingesting a previous report
+# re-reports that evidence as though it were live configuration. Scanning the
+# same directory twice therefore grew the finding count with no code change.
+# Detection is structural rather than by directory name, so a project's own
+# unrelated "reports/" data is still scanned normally.
+def _is_argus_generated_report(path: Path, content: str) -> bool:
+    suffix = path.suffix.lower()
+    if suffix == ".md":
+        return content.lstrip().startswith("# Argus Security Evaluation Report")
+    if suffix not in {".json", ".sarif"}:
+        return False
+    stripped = content.lstrip()
+    if not stripped.startswith("{"):
+        return False
+    try:
+        document = json.loads(content)
+    except (ValueError, RecursionError):
+        return False
+    if not isinstance(document, dict):
+        return False
+    metadata = document.get("metadata")
+    if isinstance(metadata, dict) and "argus_version" in metadata:
+        return True
+    runs = document.get("runs")
+    if isinstance(runs, list) and runs:
+        first = runs[0]
+        if isinstance(first, dict):
+            driver = (
+                first.get("tool", {}).get("driver", {})
+                if isinstance(first.get("tool"), dict)
+                else {}
+            )
+            if isinstance(driver, dict) and driver.get("name") == "Argus":
+                return True
+            details = first.get("automationDetails")
+            if isinstance(details, dict) and str(details.get("id", "")).startswith("argus/"):
+                return True
+    return False
+
+
+def _matches_exclude(relative: str, patterns: tuple[str, ...]) -> bool:
+    if not patterns:
+        return False
+    posix = PurePosixPath(relative)
+    for pattern in patterns:
+        normalized = pattern.strip().replace("\\", "/").rstrip("/")
+        if not normalized:
+            continue
+        if posix.match(normalized) or fnmatch(relative, normalized):
+            return True
+        # Treat a bare name or prefix as "this subtree", the behavior an
+        # operator expects from --exclude reports or --exclude vendor/.
+        if relative == normalized or relative.startswith(f"{normalized}/"):
+            return True
+        if f"/{normalized}/" in f"/{relative}":
+            return True
+    return False
+
+
 def _read_record(root: Path, file_path: Path, max_file_size: int) -> FileRecord:
     relative = file_path.relative_to(root).as_posix()
     try:
@@ -119,6 +180,8 @@ def _read_record(root: Path, file_path: Path, max_file_size: int) -> FileRecord:
         content = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise SkippableFileError(f"unsupported non-UTF-8 file: {relative}") from exc
+    if _is_argus_generated_report(file_path, content):
+        raise SkippableFileError(f"previous Argus report: {relative}")
     return FileRecord(
         path=relative,
         content=content,
@@ -129,7 +192,11 @@ def _read_record(root: Path, file_path: Path, max_file_size: int) -> FileRecord:
     )
 
 
-def ingest_local(path: str, max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> ScanContext:
+def ingest_local(
+    path: str,
+    max_file_size: int = DEFAULT_MAX_FILE_SIZE,
+    exclude: tuple[str, ...] = (),
+) -> ScanContext:
     """Read a directory (or one text file) without following unsafe links."""
 
     candidate = Path(path)
@@ -139,7 +206,13 @@ def ingest_local(path: str, max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> ScanC
     files: dict[str, FileRecord] = {}
     skipped: list[str] = []
     if root.is_file():
-        record = _read_record(root.parent, root, max_file_size)
+        try:
+            record = _read_record(root.parent, root, max_file_size)
+        except SkippableFileError as exc:
+            # An explicit single-file target that cannot be scanned is a usage
+            # error, not a file to silently skip: reporting PASS over the only
+            # requested file would be indistinguishable from a clean result.
+            raise IngressError(f"target file cannot be scanned: {exc}") from exc
         files[record.path] = record
     elif root.is_dir():
         for current, dirs, names in os.walk(root, topdown=True, followlinks=False):
@@ -153,11 +226,16 @@ def ingest_local(path: str, max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> ScanC
                             f"symlink escapes scan root: {directory.relative_to(root)}"
                         )
                     continue
-                if name not in _IGNORED_DIRS:
-                    safe_dirs.append(name)
+                if name in _IGNORED_DIRS:
+                    continue
+                if _matches_exclude(directory.relative_to(root).as_posix(), exclude):
+                    continue
+                safe_dirs.append(name)
             dirs[:] = sorted(safe_dirs)
             for name in sorted(names):
                 file_path = Path(current) / name
+                if _matches_exclude(file_path.relative_to(root).as_posix(), exclude):
+                    continue
                 try:
                     record = _read_record(root, file_path, max_file_size)
                     files[record.path] = record
@@ -183,7 +261,11 @@ def _is_git_url(value: str) -> bool:
     return parsed.scheme in {"http", "https", "ssh", "git"} and bool(parsed.netloc)
 
 
-def ingest_git(repo_url: str, max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> ScanContext:
+def ingest_git(
+    repo_url: str,
+    max_file_size: int = DEFAULT_MAX_FILE_SIZE,
+    exclude: tuple[str, ...] = (),
+) -> ScanContext:
     """Shallow-clone a repository with hooks disabled, then normalize its files."""
 
     if not _is_git_url(repo_url):
@@ -209,7 +291,7 @@ def ingest_git(repo_url: str, max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> Sca
             text=True,
             timeout=300,
         )
-        context = ingest_local(str(clone_path), max_file_size=max_file_size)
+        context = ingest_local(str(clone_path), max_file_size=max_file_size, exclude=exclude)
         commit = None
         try:
             commit = subprocess.run(
@@ -239,11 +321,15 @@ def ingest_git(repo_url: str, max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> Sca
         shutil.rmtree(temporary_root, ignore_errors=True)
 
 
-def ingest(target: str, max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> ScanContext:
+def ingest(
+    target: str,
+    max_file_size: int = DEFAULT_MAX_FILE_SIZE,
+    exclude: tuple[str, ...] = (),
+) -> ScanContext:
     return (
-        ingest_git(target, max_file_size)
+        ingest_git(target, max_file_size, exclude)
         if _is_git_url(target)
-        else ingest_local(target, max_file_size)
+        else ingest_local(target, max_file_size, exclude)
     )
 
 

@@ -92,6 +92,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Suppress a specific rule (repeatable, e.g. --disable-rule ARGUS_ST_003)",
     )
     scan_parser.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help=(
+            "Skip paths matching a glob or directory name, relative to the target "
+            "(repeatable, e.g. --exclude vendor --exclude '*.min.js')"
+        ),
+    )
+    scan_parser.add_argument(
         "--json",
         action="store_true",
         dest="as_json",
@@ -370,7 +380,11 @@ def run_scan(args: argparse.Namespace) -> int:
         config = config.model_copy(update={"target_endpoint": args.endpoint})
     effective_endpoint = args.endpoint or config.target_endpoint
     ingest_started = perf_counter()
-    context = ingest(args.target, max_file_size=config.engine.max_file_size_bytes)
+    context = ingest(
+        args.target,
+        max_file_size=config.engine.max_file_size_bytes,
+        exclude=tuple(getattr(args, "exclude", []) or ()),
+    )
     ingest_seconds = perf_counter() - ingest_started
     context = context.model_copy(
         update={"profile": config.profile, "target_endpoint": effective_endpoint}
