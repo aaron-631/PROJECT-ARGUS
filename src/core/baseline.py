@@ -11,9 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from src.models import ScanReport
-
-_SEVERITY_ORDER = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+from src.models import ScanReport, SEVERITY_ORDER
 
 
 class BaselineError(ValueError):
@@ -97,8 +95,8 @@ def compare_results(current: dict[str, Any], baseline: ScanReport) -> dict[str, 
         if previous is None:
             new_findings.append(_finding_snapshot(finding, key))
             continue
-        previous_rank = _SEVERITY_ORDER.get(str(previous.get("severity")), 0)
-        current_rank = _SEVERITY_ORDER.get(str(finding.get("severity")), 0)
+        previous_rank = SEVERITY_ORDER.get(str(previous.get("severity")), 0)
+        current_rank = SEVERITY_ORDER.get(str(finding.get("severity")), 0)
         if current_rank > previous_rank:
             changed_findings.append(
                 {

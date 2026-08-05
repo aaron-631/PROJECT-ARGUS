@@ -25,6 +25,9 @@ class Severity(str, Enum):
     LOW = "LOW"
 
 
+SEVERITY_ORDER: dict[str, int] = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+
+
 class SourceMetadata(ArgusModel):
     source_type: Literal["local", "git"]
     source: str
@@ -68,6 +71,9 @@ class ScanContext(ArgusModel):
     # JSON serialization; source file hashes remain the stable scan identity.
     documents: dict[str, Any] = Field(default_factory=dict, exclude=True)
     document_errors: list[str] = Field(default_factory=list)
+    # Files intentionally not read (binary, non-UTF-8). Reported so a clean
+    # scan can never be mistaken for full coverage.
+    skipped_files: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def synchronize_file_keys(self) -> "ScanContext":

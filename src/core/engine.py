@@ -12,11 +12,9 @@ from src.core.sanitization import sanitize_value
 from src.core.registry import get_enabled_modules
 from src.core.target_client import HTTPTargetClient, TargetClient, resolve_api_key
 from src.interfaces.judge import HTTPJudgeBackend, MockJudgeBackend, NullJudgeBackend
-from src.models import AttackResult, Finding, ScanContext
+from src.models import SEVERITY_ORDER, AttackResult, Finding, ScanContext
 from src.models.config import ArgusConfig
 from src.modules.attacks.dataset import dataset_version
-
-_SEVERITY_ORDER = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
 
 class ArgusEngine:
@@ -29,6 +27,8 @@ class ArgusEngine:
             config if isinstance(config, ArgusConfig) else ArgusConfig.model_validate(config)
         )
         self.target_client = target_client
+        self._errors: list[str] = []
+        self._suppressed_rules: list[str] = []
 
     def _judge(self):
         name = self.config.judge.backend
@@ -60,6 +60,10 @@ class ArgusEngine:
                 # A plugin failure is represented as no finding; callers still
                 # get a complete report and can inspect the engine error list.
                 self._errors.append(f"scanner {scanner_id}: {type(exc).__name__}")
+        disabled = set(getattr(self.config, "disabled_rules", []))
+        if disabled:
+            self._suppressed_rules = sorted({f.rule_id for f in findings if f.rule_id in disabled})
+            findings = [f for f in findings if f.rule_id not in disabled]
         return sorted(
             findings, key=lambda item: (item.rule_id, item.source_file or "", item.line or 0)
         )
@@ -198,7 +202,8 @@ class ArgusEngine:
         return sorted(results, key=lambda item: (item.module_id, item.payload_id))
 
     async def run(self, scan_context: ScanContext) -> dict[str, Any]:
-        self._errors: list[str] = []
+        self._errors = []
+        self._suppressed_rules = []
         context = (
             scan_context
             if isinstance(scan_context, ScanContext)
@@ -230,12 +235,12 @@ class ArgusEngine:
             if any(item.judge_score is not None for item in attack_results)
             else "canonical_only"
         )
-        fail_threshold = _SEVERITY_ORDER[self.config.reporting.fail_on]
+        fail_threshold = SEVERITY_ORDER[self.config.reporting.fail_on]
         blocked = any(
-            _SEVERITY_ORDER.get(item.severity.value, 0) >= fail_threshold for item in findings
+            SEVERITY_ORDER.get(item.severity.value, 0) >= fail_threshold for item in findings
         ) or any(
             item.canonical_result.get("attack_succeeded")
-            and fail_threshold <= _SEVERITY_ORDER["HIGH"]
+            and fail_threshold <= SEVERITY_ORDER["HIGH"]
             for item in attack_results
         )
         dynamic_errors = sum(bool(item.error) for item in attack_results)
@@ -267,6 +272,9 @@ class ArgusEngine:
                 "errors": execution_errors,
                 "error_count": len(execution_errors) + dynamic_errors,
                 "dynamic_error_count": dynamic_errors,
+                "skipped_file_count": len(context.skipped_files),
+                "skipped_files": list(context.skipped_files),
+                "suppressed_rules": list(self._suppressed_rules),
                 "fail_on": self.config.reporting.fail_on,
                 "decision": decision,
                 **inventory,

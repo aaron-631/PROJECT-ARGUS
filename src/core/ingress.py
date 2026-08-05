@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import shutil
 import subprocess
@@ -18,28 +19,63 @@ class IngressError(ValueError):
     """Raised when an input cannot be safely normalized."""
 
 
+class SkippableFileError(IngressError):
+    """Raised for files that are not scannable but must not abort a directory walk."""
+
+
 DEFAULT_MAX_FILE_SIZE = 1_048_576
-_IGNORED_DIRS = {".git", ".hg", ".svn", "__pycache__", ".venv", "node_modules"}
+_IGNORED_DIRS = {
+    ".git",
+    ".hg",
+    ".svn",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "node_modules",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".vault",
+    "runtime-audit",
+    "build",
+    "dist",
+}
 _BINARY_EXTENSIONS = {
     ".7z",
+    ".aac",
+    ".avi",
+    ".bmp",
     ".class",
+    ".db",
     ".dll",
     ".dylib",
+    ".eot",
     ".exe",
+    ".flac",
     ".gif",
     ".gz",
     ".ico",
     ".jar",
     ".jpeg",
     ".jpg",
+    ".mov",
     ".mp3",
     ".mp4",
+    ".otf",
     ".pdf",
     ".png",
+    ".psd",
     ".pyc",
     ".so",
+    ".sqlite",
+    ".sqlite3",
+    ".svg",
     ".tar",
+    ".tif",
+    ".tiff",
+    ".ttf",
+    ".webp",
     ".woff",
+    ".woff2",
     ".zip",
 }
 
@@ -78,11 +114,11 @@ def _read_record(root: Path, file_path: Path, max_file_size: int) -> FileRecord:
         raise IngressError(f"file exceeds {max_file_size} bytes: {relative}")
     raw = file_path.read_bytes()
     if b"\x00" in raw or file_path.suffix.lower() in _BINARY_EXTENSIONS:
-        raise IngressError(f"unsupported binary file: {relative}")
+        raise SkippableFileError(f"unsupported binary file: {relative}")
     try:
         content = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise IngressError(f"unsupported non-UTF-8 file: {relative}") from exc
+        raise SkippableFileError(f"unsupported non-UTF-8 file: {relative}") from exc
     return FileRecord(
         path=relative,
         content=content,
@@ -101,6 +137,7 @@ def ingest_local(path: str, max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> ScanC
         raise IngressError(f"local target does not exist or is a symlink: {path}")
     root = candidate.resolve()
     files: dict[str, FileRecord] = {}
+    skipped: list[str] = []
     if root.is_file():
         record = _read_record(root.parent, root, max_file_size)
         files[record.path] = record
@@ -121,13 +158,23 @@ def ingest_local(path: str, max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> ScanC
             dirs[:] = sorted(safe_dirs)
             for name in sorted(names):
                 file_path = Path(current) / name
-                record = _read_record(root, file_path, max_file_size)
-                files[record.path] = record
+                try:
+                    record = _read_record(root, file_path, max_file_size)
+                    files[record.path] = record
+                except SkippableFileError as exc:
+                    logging.debug("Skipping file %s: %s", file_path, exc)
+                    skipped.append(file_path.relative_to(root).as_posix())
     else:
         raise IngressError(f"unsupported local target: {path}")
     source = SourceMetadata(source_type="local", source=str(root))
     return parse_context(
-        ScanContext(source_path=str(root), source_type="local", files=files, source_metadata=source)
+        ScanContext(
+            source_path=str(root),
+            source_type="local",
+            files=files,
+            source_metadata=source,
+            skipped_files=sorted(skipped),
+        )
     )
 
 

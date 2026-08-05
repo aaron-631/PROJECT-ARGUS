@@ -315,6 +315,51 @@ def _iter_values(value: Any, path: str = "") -> Iterable[tuple[str, Any]]:
             yield from _iter_values(child, f"{path}[{index}]")
 
 
+_SUBPROCESS_CALLS = frozenset(
+    {
+        "subprocess.run",
+        "subprocess.call",
+        "subprocess.Popen",
+        "subprocess.check_output",
+        "subprocess.check_call",
+    }
+)
+
+
+def _import_bindings(tree: ast.AST) -> dict[str, str]:
+    """Map local names to the dotted paths they refer to.
+
+    ``import os``            -> {"os": "os"}
+    ``import os as o``       -> {"o": "os"}
+    ``from os import system`` -> {"system": "os.system"}
+    ``from os import system as s`` -> {"s": "os.system"}
+
+    Without this, ``from os import system`` reads as a bare local call and
+    escapes detection entirely.
+    """
+
+    bindings: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                bindings[alias.asname or alias.name.split(".")[0]] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for alias in node.names:
+                bindings[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return bindings
+
+
+def _qualified_call_name(node: ast.Call, bindings: dict[str, str]) -> str | None:
+    """Resolve a call to its dotted origin, following import aliases."""
+
+    if isinstance(node.func, ast.Name):
+        return bindings.get(node.func.id, node.func.id)
+    if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+        root = bindings.get(node.func.value.id, node.func.value.id)
+        return f"{root}.{node.func.attr}"
+    return None
+
+
 def _is_mcp_server_location(location: str) -> bool:
     """Recognize known MCP server registry paths, not generic project URLs."""
 
@@ -386,7 +431,7 @@ class MCPScanner(BaseStaticScanner):
                 if not isinstance(node, dict):
                     return
                 for key, child in node.items():
-                    normalized_key = key.lower().replace("-", "_")
+                    normalized_key = str(key).lower().replace("-", "_")
                     child_location = f"{location}.{normalized_key}" if location else normalized_key
                     if (
                         isinstance(child, dict) and normalized_key in {"mcpservers", "mcp_servers"}
@@ -507,18 +552,14 @@ class MCPScanner(BaseStaticScanner):
             ):
                 try:
                     tree = parsed_document.value
+                    bindings = _import_bindings(tree)
                     for ast_node in ast.walk(tree):
-                        if (
-                            isinstance(ast_node, ast.Call)
-                            and isinstance(ast_node.func, ast.Name)
-                            and ast_node.func.id in {"eval", "exec"}
-                        ):
-                            add("ARGUS_ST_003", path, {"call": ast_node.func.id}, ast_node.lineno)
-                        if (
-                            isinstance(ast_node, ast.Call)
-                            and isinstance(ast_node.func, ast.Attribute)
-                            and ast_node.func.attr == "run"
-                        ):
+                        if not isinstance(ast_node, ast.Call):
+                            continue
+                        qualified = _qualified_call_name(ast_node, bindings)
+                        if qualified in {"eval", "exec", "__import__"}:
+                            add("ARGUS_ST_003", path, {"call": qualified}, ast_node.lineno)
+                        if qualified in _SUBPROCESS_CALLS:
                             safe_literal_args = (
                                 bool(ast_node.args)
                                 and isinstance(ast_node.args[0], (ast.List, ast.Tuple))
@@ -533,32 +574,27 @@ class MCPScanner(BaseStaticScanner):
                                 and keyword.value.value is True
                                 for keyword in ast_node.keywords
                             )
-                            if (
-                                isinstance(ast_node.func.value, ast.Name)
-                                and ast_node.func.value.id == "subprocess"
-                                and (not safe_literal_args or shell_enabled)
-                            ):
+                            if not safe_literal_args or shell_enabled:
                                 add(
                                     "ARGUS_ST_003",
                                     path,
-                                    {"call": "subprocess.run"},
-                                    ast_node.lineno,
-                                )  # noqa: E501
-                        if (
-                            isinstance(ast_node, ast.Call)
-                            and isinstance(ast_node.func, ast.Attribute)
-                            and ast_node.func.attr in {"unsafe_load", "load"}
-                        ):
-                            if (
-                                isinstance(ast_node.func.value, ast.Name)
-                                and ast_node.func.value.id == "yaml"
-                            ):
-                                add(
-                                    "ARGUS_ST_007",
-                                    path,
-                                    {"call": f"yaml.{ast_node.func.attr}"},
+                                    {"call": qualified},
                                     ast_node.lineno,
                                 )
+                        if qualified in {"os.system", "os.popen"}:
+                            add(
+                                "ARGUS_ST_003",
+                                path,
+                                {"call": qualified},
+                                ast_node.lineno,
+                            )
+                        if qualified in {"yaml.load", "yaml.unsafe_load"}:
+                            add(
+                                "ARGUS_ST_007",
+                                path,
+                                {"call": qualified},
+                                ast_node.lineno,
+                            )
                     if re.search(
                         r"(?i)\bimport\s+pickle\b|\bpickle\.loads?\s*\(", content
                     ) and self._supports("ARGUS_ST_007", path, parsed_document):
@@ -792,7 +828,7 @@ class MCPScanner(BaseStaticScanner):
                     description = str(value.get("description", ""))
                     combined = f"{name} {description} {json.dumps(value, default=str)}"
                     for key, child in value.items():
-                        if key.lower().replace("-", "_") in {
+                        if str(key).lower().replace("-", "_") in {
                             "pass_env",
                             "environment",
                             "env",
@@ -813,7 +849,7 @@ class MCPScanner(BaseStaticScanner):
                                 )
                     if self._supports("ARGUS_ST_016", path, parsed_document):
                         for key, child in value.items():
-                            normalized_key = key.lower().replace("-", "_")
+                            normalized_key = str(key).lower().replace("-", "_")
                             if normalized_key not in _BROAD_SCOPE_KEYS:
                                 continue
                             candidates = child if isinstance(child, list) else [child]
@@ -847,14 +883,14 @@ class MCPScanner(BaseStaticScanner):
                     if self._supports("ARGUS_ST_017", path, parsed_document):
                         is_tool = (
                             any(
-                                key.lower().replace("-", "_")
+                                str(key).lower().replace("-", "_")
                                 in {"name", "tool", "tool_name", "input_schema", "inputschema"}
                                 for key in value
                             )
                             or ".tools" in location.lower()
                         )
                         approval = any(
-                            key.lower().replace("-", "_")
+                            str(key).lower().replace("-", "_")
                             in {
                                 "require_approval",
                                 "approval",
@@ -881,7 +917,7 @@ class MCPScanner(BaseStaticScanner):
                             )
                     if self._supports("ARGUS_ST_018", path, parsed_document):
                         for key, child in value.items():
-                            normalized_key = key.lower().replace("-", "_")
+                            normalized_key = str(key).lower().replace("-", "_")
                             if normalized_key not in _NETWORK_SCOPE_KEYS:
                                 continue
                             candidates = child if isinstance(child, list) else [child]
@@ -934,7 +970,7 @@ class MCPScanner(BaseStaticScanner):
                                 )
                     if self._supports("ARGUS_ST_021", path, parsed_document):
                         for key, child in value.items():
-                            normalized_key = key.lower().replace("-", "_")
+                            normalized_key = str(key).lower().replace("-", "_")
                             if (
                                 normalized_key
                                 in {
@@ -954,7 +990,7 @@ class MCPScanner(BaseStaticScanner):
                     destructive_match = _DESTRUCTIVE_RE.search(combined)  # noqa: E501
                     if destructive_match and self._supports("ARGUS_ST_004", path, parsed_document):
                         approval = any(
-                            key.lower()
+                            str(key).lower()
                             in {
                                 "require_approval",
                                 "approval",
@@ -977,7 +1013,7 @@ class MCPScanner(BaseStaticScanner):
                             if self._supports("ARGUS_ST_006", path, parsed_document):
                                 add("ARGUS_ST_006", path, {"tool": name}, _line_for(raw, name))
                     if self._supports("ARGUS_ST_002", path, parsed_document) and {
-                        key.lower() for key in value
+                        str(key).lower() for key in value
                     }.intersection({"inputschema", "schema", "parameters"}):
                         schema = value.get(
                             "inputSchema", value.get("schema", value.get("parameters", {}))
@@ -1019,7 +1055,7 @@ class MCPScanner(BaseStaticScanner):
                     verification = [
                         child
                         for key, child in value.items()
-                        if key.lower()
+                        if str(key).lower()
                         in {
                             "signature",
                             "checksum",

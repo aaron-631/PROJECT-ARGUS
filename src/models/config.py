@@ -84,6 +84,7 @@ class ArgusConfig(ConfigModel):
     )
     enabled_modules: dict[str, list[str]] = Field(default_factory=dict)
     disabled_modules: list[str] = Field(default_factory=list)
+    disabled_rules: list[str] = Field(default_factory=list)
     target_endpoint: str | None = None
     dataset_version: str = "1.0.0"
 

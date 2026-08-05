@@ -16,6 +16,7 @@ from .domain import (
     ScanContext,
     ScanReport,
     Severity,
+    SEVERITY_ORDER,
     SourceMetadata,
 )
 from .documents import DocumentKind, ParsedDocument
@@ -34,5 +35,6 @@ __all__ = [
     "ScanContext",
     "ScanReport",
     "Severity",
+    "SEVERITY_ORDER",
     "SourceMetadata",
 ]

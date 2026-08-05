@@ -161,6 +161,10 @@ class _StdioSession:
         self._stderr_task: asyncio.Task[None] | None = None
         self._request_id = 0
         self._isolated_process_group = os.name == "posix"
+        self._stderr_lines: list[str] = []
+
+    def stderr_summary(self) -> str:
+        return "\n".join(self._stderr_lines)
 
     async def start(self) -> None:
         try:
@@ -182,8 +186,17 @@ class _StdioSession:
     async def _drain_stderr(self) -> None:
         if self.process is None or self.process.stderr is None:
             return
-        while await self.process.stderr.readline():
-            pass
+        while True:
+            line = await self.process.stderr.readline()
+            if not line:
+                break
+            try:
+                decoded = line.decode("utf-8", errors="replace").rstrip()
+                self._stderr_lines.append(decoded)
+                if len(self._stderr_lines) > 5:
+                    self._stderr_lines.pop(0)
+            except Exception:
+                pass
 
     async def _send(self, message: dict[str, Any]) -> None:
         if self.process is None or self.process.stdin is None:
@@ -331,6 +344,10 @@ async def probe_stdio(
             pages=pages,
             session_id_present=False,
         )
+    except Exception as exc:
+        if session._stderr_lines and isinstance(exc, MCPProbeError):
+            exc.args = (f"{exc.args[0]}\nStderr:\n{session.stderr_summary()}",) + exc.args[1:]
+        raise
     finally:
         await session.close()
 

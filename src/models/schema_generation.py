@@ -48,12 +48,12 @@ def schemas_are_current(schema_dir: str | Path = ROOT) -> bool:
         )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate or verify Argus JSON Schema contracts")
     parser.add_argument(
         "--check", action="store_true", help="fail when committed schemas are stale"
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.check:
         if not schemas_are_current():
             print("Argus JSON schemas are stale; run python -m src.models.schema_generation")
