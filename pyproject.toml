@@ -22,6 +22,9 @@ dependencies = [
 argus = "argus:main"
 argus-runtime = "runtime_gateway:main"
 
+# Plugin packages publish into these groups; see docs/plugins.md.
+# Argus itself declares no entries here — an empty table emits nothing.
+
 [tool.setuptools]
 py-modules = ["argus", "runtime_gateway"]
 include-package-data = true

@@ -103,6 +103,32 @@ def discover_builtin_modules() -> None:
         if module_id not in _registry[group]:
             _register(group, cls, interface, identity)
 
+    try:
+        from importlib.metadata import entry_points
+
+        for group, interface, identity in (
+            ("argus.scanners", BaseStaticScanner, "scanner_id"),
+            ("argus.attacks", BaseAttackModule, "module_id"),
+            ("argus.judges", JudgeBackend, "backend_id"),
+            ("argus.exporters", BaseExporter, "exporter_id"),
+        ):
+            registry_group = {
+                "argus.scanners": "scanners",
+                "argus.attacks": "attack_modules",
+                "argus.judges": "judges",
+                "argus.exporters": "exporters",
+            }[group]
+            for ep in entry_points(group=group):
+                try:
+                    cls = ep.load()
+                    module_id = getattr(cls, identity, None)
+                    if module_id and module_id not in _registry[registry_group]:
+                        _register(registry_group, cls, interface, identity)
+                except Exception:
+                    pass  # External plugin failed to load; continue
+    except ImportError:
+        pass
+
 
 def get_enabled_modules(config: dict | Any) -> dict[str, dict[str, type[Any]]]:
     discover_builtin_modules()
