@@ -66,6 +66,9 @@ jobs:
           ignore-unfixed: true
           severity: CRITICAL,HIGH
           exit-code: "1"
+          # The Trivy action's nested cache action is still Node 20 based.
+          # Disable it until that transitive action ships a Node 24 runtime.
+          cache: false
       - name: Validate Docker Compose
         run: |
           docker compose config
