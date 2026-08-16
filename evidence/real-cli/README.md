@@ -5,18 +5,20 @@ on installed agent CLIs without scanning credentials, conversation history,
 session databases, logs, caches, or crash dumps. No secret value or model
 response is committed.
 
-Recorded: 2026-08-16 on Linux/WSL2, Python 3.14.4.
+Recorded: 2026-08-16 on Linux/WSL2, Python 3.14.4. Static results below were
+regenerated from Argus source commit
+`8798c81b70044222176dd07223a50be0f2dd5a49`.
 
 ## Static configuration checks
 
 | Client | Version | Surfaces checked | Result |
 |---|---:|---|---|
 | Antigravity local settings | local settings associated with Gemini CLI | one settings file | PASS; 0 findings |
-| Gemini CLI | 0.49.0 | general config | PASS; 0 findings |
+| Gemini CLI | 0.49.0 | `/home/aaron631/.gemini/settings.json` | PASS; 0 findings |
 | Gemini CLI MCP registry | 0.49.0 | MCP config | ERROR; file is empty, so Argus did not call it safe |
-| Codex CLI | 0.146.0 | `config.toml`, user rules | PASS; 0 findings |
+| Codex CLI | 0.146.0 | `config.toml` | PASS; 0 findings |
 | Claude Code | 2.1.199 | global settings | BLOCK; 1 critical credential-shaped value |
-| Claude Code | 2.1.199 | local settings | BLOCK; 2 critical credential-shaped values and 9 distinct unbounded high-impact shell permission families |
+| Claude Code | 2.1.199 | local settings | BLOCK; 11 critical findings; secret values were not recorded |
 | Claude Code state | 2.1.199 | top-level state/MCP metadata | PASS; 0 findings |
 
 Claude’s native permission list was the useful finding. Entries such as
@@ -50,7 +52,7 @@ Use explicit configuration paths and keep private files out of the target:
 ```bash
 argus audit --target "$HOME/.codex/config.toml" --output reports/real-cli/codex
 argus audit --target "$HOME/.claude/settings.json" --output reports/real-cli/claude
-argus audit --target "$HOME/.gemini/config/config.json" --output reports/real-cli/gemini
+argus audit --target "$HOME/.gemini/settings.json" --output reports/real-cli/gemini
 ```
 
 For a live model endpoint, use `argus audit --endpoint` with an authorized

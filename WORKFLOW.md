@@ -707,13 +707,13 @@ were intentionally excluded from the scan targets and evidence:
 | Test | What was scanned or contacted | Result |
 | --- | --- | --- |
 | Claude Code 2.1.199 global settings | `$HOME/.claude/settings.json` | BLOCK; 1 CRITICAL hardcoded-credential finding; the secret value was not recorded |
-| Claude Code 2.1.199 local settings | `$HOME/.claude/settings.local.json` | BLOCK; 2 CRITICAL credential-shaped findings and 9 unbounded high-impact permission families |
-| Codex CLI 0.146.0 | `$HOME/.codex/config.toml` and user rules | PASS; 0 findings and no MCP declarations in these files |
+| Claude Code 2.1.199 local settings | `$HOME/.claude/settings.local.json` | BLOCK; 11 CRITICAL findings; secret values were not recorded |
+| Codex CLI 0.146.0 | `$HOME/.codex/config.toml` | PASS; 0 findings |
 | Antigravity local settings | `$HOME/.gemini/antigravity-cli/settings.json` | PASS; 0 findings |
-| Gemini CLI 0.49.0 | `$HOME/.gemini/config/config.json` | PASS; 0 findings |
+| Gemini CLI 0.49.0 | `$HOME/.gemini/settings.json` | PASS; 0 findings |
 | Gemini MCP registry | `$HOME/.gemini/config/mcp_config.json` | ERROR; file is empty, so Argus correctly refused to call it safe |
 | OpenClaw | `$HOME/.openclaw` | Not installed in this environment; no result claimed |
-| Official MCP server 2026.7.10 | Installed `argus mcp-probe` launched `@modelcontextprotocol/server-filesystem` over stdio with one temporary directory as its only allowed root | 14 tools, 1 page, 0 tool calls; 0.640s with cached `npx --offline`; Argus returned BLOCK for 2 HIGH findings |
+| Official MCP server 2026.7.10 | Installed `argus mcp-probe` launched `@modelcontextprotocol/server-filesystem` over stdio with one temporary directory as its only allowed root | 14 tools, 1 page, 0 tool calls; 0.561s with cached `npx --offline`; Argus returned BLOCK for 2 HIGH findings |
 
 The reproducible static commands were:
 
@@ -721,13 +721,13 @@ The reproducible static commands were:
 .venv/bin/argus audit --target "$HOME/.claude/settings.local.json" --output ./reports/real-claude
 .venv/bin/argus audit --target "$HOME/.claude/settings.json" --output ./reports/real-claude-global
 .venv/bin/argus audit --target "$HOME/.codex/config.toml" --output ./reports/real-codex
-.venv/bin/argus audit --target "$HOME/.gemini/config/config.json" --output ./reports/real-gemini-config
+.venv/bin/argus audit --target "$HOME/.gemini/settings.json" --output ./reports/real-gemini-config
 .venv/bin/argus audit --target "$HOME/.gemini/config/mcp_config.json" --output ./reports/real-gemini-mcp
 ```
 
-The CLI configuration reports were written to `/tmp/argus-installed-*` during
-the earlier verification run, and the refreshed MCP report is in
-`/tmp/argus-remediation-real-mcp-offline`. Retain the generated `report.json`,
+The current static CLI reports were regenerated from source commit
+`8798c81b70044222176dd07223a50be0f2dd5a49` in `/tmp/argus-real-demo/real-cli-*`.
+The refreshed MCP report is recorded in `evidence/real-mcp/`. Retain the generated `report.json`,
 `report.md`, and `report.sarif` artifacts when repeating this on another
 machine. The empty
 Gemini MCP file demonstrates an important gate: malformed or incomplete
@@ -735,7 +735,7 @@ configuration is `ERROR` with a non-zero exit code, never a false `PASS`.
 
 The cold MCP timing includes the first `npx` package startup/download and is
 host-dependent. The recorded first online run took 70.628 seconds; the cached
-`npx --offline` run took 0.640 seconds inside Argus. Keep the 120-second timeout
+`npx --offline` run took 0.561 seconds inside Argus. Keep the 120-second timeout
 for first-run installation or preinstall the pinned server package.
 
 The MCP runtime check used the official package at a fixed version, sent only
@@ -749,7 +749,7 @@ or any other side-effecting tool. The reproducible command was:
   --arg=@modelcontextprotocol/server-filesystem@2026.7.10 \
   --arg=/tmp/argus-real-mcp-root --timeout 120 \
   --server-name official-filesystem \
---confirm-live --output ./reports/real-mcp
+  --confirm-live --output ./reports/real-mcp
 ```
 
 The MCP server was started with a fixed package version and an isolated

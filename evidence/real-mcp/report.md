@@ -2,7 +2,7 @@
 
 - Source: `stdio:npx`
 - Profile: `default`
-- Scan ID: `f590b6f6c398dc11`
+- Scan ID: `322ab801bd0a8dfa`
 - Evaluation methodology: `canonical_only`
 - Overall findings: **BLOCK** (fail on `HIGH`)
 
@@ -24,7 +24,7 @@ Maximum risk: **3.91 / 10**
 ## Performance
 
 - MCP tools discovered: **14**
-- Elapsed: **0.64 seconds**
+- Elapsed: **0.561 seconds**
 
 ## Static findings
 

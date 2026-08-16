@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "automationDetails": {
+        "id": "argus/322ab801bd0a8dfa"
+      },
+      "properties": {
+        "compliance_coverage": {
+          "attack_modules": [],
+          "cwe": {
+            "mapped": [
+              "CWE-1104",
+              "CWE-20",
+              "CWE-200",
+              "CWE-22",
+              "CWE-250",
+              "CWE-295",
+              "CWE-319",
+              "CWE-400",
+              "CWE-502",
+              "CWE-668",
+              "CWE-78",
+              "CWE-798",
+              "CWE-835",
+              "CWE-862",
+              "CWE-95"
+            ]
+          },
+          "mitre_atlas": {
+            "mapped": [
+              "AML.T0046",
+              "AML.T0048",
+              "AML.T0049",
+              "AML.T0051",
+              "AML.T0051.001",
+              "AML.T0052"
+            ],
+            "reference": "live-matrix"
+          },
+          "owasp_agentic": {
+            "edition": "2026",
+            "not_covered": [
+              "ASI07",
+              "ASI09",
+              "ASI10"
+            ],
+            "tested": [
+              "ASI01",
+              "ASI02",
+              "ASI03",
+              "ASI04",
+              "ASI05",
+              "ASI06",
+              "ASI08"
+            ]
+          },
+          "owasp_llm": {
+            "edition": "2025",
+            "not_covered": [
+              "LLM07",
+              "LLM09"
+            ],
+            "tested": [
+              "LLM01",
+              "LLM02",
+              "LLM03",
+              "LLM04",
+              "LLM05",
+              "LLM06",
+              "LLM08",
+              "LLM10"
+            ]
+          },
+          "rule_ids": [
+            "ARGUS_ST_001",
+            "ARGUS_ST_002",
+            "ARGUS_ST_003",
+            "ARGUS_ST_004",
+            "ARGUS_ST_005",
+            "ARGUS_ST_006",
+            "ARGUS_ST_007",
+            "ARGUS_ST_008",
+            "ARGUS_ST_009",
+            "ARGUS_ST_010",
+            "ARGUS_ST_011",
+            "ARGUS_ST_012",
+            "ARGUS_ST_013",
+            "ARGUS_ST_014",
+            "ARGUS_ST_015",
+            "ARGUS_ST_016",
+            "ARGUS_ST_017",
+            "ARGUS_ST_018",
+            "ARGUS_ST_019",
+            "ARGUS_ST_020",
+            "ARGUS_ST_021",
+            "ARGUS_ST_022",
+            "ARGUS_ST_023",
+            "ARGUS_ST_024",
+            "ARGUS_ST_025",
+            "ARGUS_ST_026",
+            "ARGUS_ST_027",
+            "ARGUS_ST_028",
+            "ARGUS_ST_029"
+          ]
+        },
+        "decision": "BLOCK",
+        "fail_on": "HIGH",
+        "scan_id": "322ab801bd0a8dfa"
+      },
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "mcp-probe.json"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "A tool accepts structured input without a validation pattern or equivalent constraint. Evidence: {\"fields\": [\"head\", \"path\", \"tail\"], \"file\": \"mcp-probe.json\", \"tool\": \"read_file\"}"
+          },
+          "partialFingerprints": {
+            "primaryLocationLineHash": "b8f652d6fa46e9cc"
+          },
+          "properties": {
+            "atlas_ids": [],
+            "confidence_score": 0.92,
+            "cwe_ids": [
+              "CWE-20"
+            ],
+            "deployment_context": "human_in_loop",
+            "evaluation_methodology": "deterministic_static",
+            "owasp_ids": [
+              "LLM05",
+              "ASI02"
+            ],
+            "risk_score": 3.22
+          },
+          "ruleId": "ARGUS_ST_002"
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "mcp-probe.json"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "A tool can send, change, export, grant, or execute a high-impact action without an explicit approval checkpoint. Evidence: {\"file\": \"mcp-probe.json\", \"operation\": \"write_file\", \"tool\": \"write_file\"}"
+          },
+          "partialFingerprints": {
+            "primaryLocationLineHash": "3fa2fab20cc3c9a2"
+          },
+          "properties": {
+            "atlas_ids": [
+              "AML.T0052"
+            ],
+            "confidence_score": 0.92,
+            "cwe_ids": [
+              "CWE-862"
+            ],
+            "deployment_context": "human_in_loop",
+            "evaluation_methodology": "deterministic_static",
+            "owasp_ids": [
+              "LLM06",
+              "ASI02"
+            ],
+            "risk_score": 3.91
+          },
+          "ruleId": "ARGUS_ST_017"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/aaron-631/PROJECT-ARGUS",
+          "name": "Argus",
+          "rules": [
+            {
+              "fullDescription": {
+                "text": "A tool accepts structured input without a validation pattern or equivalent constraint."
+              },
+              "help": {
+                "text": "Add JSON Schema types, bounds, enums, and patterns for user-controlled fields."
+              },
+              "id": "ARGUS_ST_002",
+              "name": "Missing input sanitization schema",
+              "properties": {
+                "atlas_ids": [],
+                "cwe_ids": [
+                  "CWE-20"
+                ],
+                "evaluation_methodology": "deterministic_static",
+                "owasp_ids": [
+                  "LLM05",
+                  "ASI02"
+                ],
+                "security-severity": "3.22",
+                "severity": "HIGH",
+                "tags": [
+                  "LLM05",
+                  "ASI02",
+                  "CWE-20"
+                ]
+              },
+              "shortDescription": {
+                "text": "Missing input sanitization schema"
+              }
+            },
+            {
+              "fullDescription": {
+                "text": "A tool can send, change, export, grant, or execute a high-impact action without an explicit approval checkpoint."
+              },
+              "help": {
+                "text": "Add human approval immediately before the side effect and validate the tool arguments against a strict schema."
+              },
+              "id": "ARGUS_ST_017",
+              "name": "High-impact MCP tool without approval",
+              "properties": {
+                "atlas_ids": [
+                  "AML.T0052"
+                ],
+                "cwe_ids": [
+                  "CWE-862"
+                ],
+                "evaluation_methodology": "deterministic_static",
+                "owasp_ids": [
+                  "LLM06",
+                  "ASI02"
+                ],
+                "security-severity": "3.91",
+                "severity": "HIGH",
+                "tags": [
+                  "LLM06",
+                  "ASI02",
+                  "AML.T0052",
+                  "CWE-862"
+                ]
+              },
+              "shortDescription": {
+                "text": "High-impact MCP tool without approval"
+              }
+            }
+          ],
+          "version": "0.2.0"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

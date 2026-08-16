@@ -243,7 +243,7 @@ acceptance procedure is in [POC.md](POC.md).
 | Evidence bundle | [Sanitized recorded MCP result](evidence/real-mcp/README.md) with provenance and hashes |
 | Real local CLI verification | [Codex, Claude Code, Gemini CLI, and Antigravity settings](evidence/real-cli/README.md) with static and bounded live results |
 | Compatibility and supply chain | Cross-platform CI matrix, dependency audit/SBOM, and Docker image advisory scan |
-| Performance smoke run | Safe benchmark: 2 files in 0.018s; real MCP discovery: 14 tools in 0.640s with cached `npx --offline`; first `npx` startup was 70.628s on the recorded host |
+| Performance smoke run | Safe benchmark: 2 files in 0.028s; real MCP discovery: 14 tools in 0.561s with cached `npx --offline`; first `npx` startup was 70.628s on the recorded host |
 | Runtime POC | The repository CI/Compose workflow is configured to verify health, `403` prompt blocking, forwarding, metrics, and sanitized audit events |
 
 The real MCP evidence is documented in [WORKFLOW.md](WORKFLOW.md#661-real-world-verification-run).
@@ -274,15 +274,15 @@ $ .venv/bin/argus mcp-probe \
     --transport stdio --command npx --arg=--offline --arg=-y \
     --arg=@modelcontextprotocol/server-filesystem@2026.7.10 \
     --arg=/tmp/argus-real-mcp-root --server-name official-filesystem \
-    --timeout 120 --confirm-live --output /tmp/argus-remediation-real-mcp-offline
+    --timeout 120 --confirm-live --output /tmp/argus-real-demo/cli-official-mcp-release
 
 [Argus] Decision: BLOCK
 [Argus] MCP transport: stdio; tools discovered: 14
 [Argus] Tool calls: 0 (read-only discovery)
-[Argus] Performance: 0.640s
-[Argus] Report written: /tmp/argus-remediation-real-mcp-offline/report.json
-[Argus] Report written: /tmp/argus-remediation-real-mcp-offline/report.md
-[Argus] Report written: /tmp/argus-remediation-real-mcp-offline/report.sarif
+[Argus] Performance: 0.561s
+[Argus] Report written: /tmp/argus-real-demo/cli-official-mcp-release/report.json
+[Argus] Report written: /tmp/argus-real-demo/cli-official-mcp-release/report.md
+[Argus] Report written: /tmp/argus-real-demo/cli-official-mcp-release/report.sarif
 shell_status:10
 ```
 

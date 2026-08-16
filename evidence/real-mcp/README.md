@@ -6,8 +6,7 @@ arguments, or tool execution results.
 
 ## Run
 
-- Source baseline commit: recorded in `record.json`; this run was refreshed from
-  the final remediation source before the merge to `main`
+- Source baseline commit: `8798c81b70044222176dd07223a50be0f2dd5a49`
 - Host: Linux/WSL2
 - Python: 3.14.4
 - Node.js: 24.15.0
@@ -23,11 +22,13 @@ arguments, or tool execution results.
 
 - 14 tools discovered on 1 page;
 - 2 HIGH findings;
-- 0.640 seconds on this cached `npx --offline` run; the first online startup took
+- 0.561 seconds on this cached `npx --offline` run; the first online startup took
   70.628 seconds on this host;
 - OWASP/Agentic/ATLAS metadata is present in the generated report;
 - JSON/Markdown/SARIF reports generated;
 - report hashes and the sanitized machine-readable record are in `record.json`.
 
-The finding details are preserved in [`report.md`](report.md). Re-run the
-command in the workflow to regenerate the full report for the current host.
+The finding details are preserved in [`report.md`](report.md), with the exact
+machine-readable [`report.json`](report.json) and GitHub-compatible
+[`report.sarif`](report.sarif) beside it. Re-run the command in the workflow to
+regenerate the report for the current host.
