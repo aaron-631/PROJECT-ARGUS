@@ -6,8 +6,9 @@ arguments, or tool execution results.
 
 ## Run
 
-- Source code commit: `7b9a22f` (executable code; later commits only refreshed
-  documentation and portfolio files)
+- Source baseline commit: `f1cae6a`; this recorded run was executed from the
+  `feature/argus-taxonomy-indirect-injection` working tree after the taxonomy,
+  dataset, and reporting changes described in this branch
 - Host: Linux/WSL2
 - Python: 3.14.4
 - Node.js: 24.15.0
@@ -23,7 +24,8 @@ arguments, or tool execution results.
 
 - 14 tools discovered on 1 page;
 - 2 HIGH findings;
-- 70.655 seconds cold `npx` startup;
+- 1.016 seconds on this warm local run (cold `npx` startup is host-dependent);
+- OWASP/Agentic/ATLAS metadata is present in the generated report;
 - JSON/Markdown/SARIF reports generated;
 - report hashes and the sanitized machine-readable record are in `record.json`.
 

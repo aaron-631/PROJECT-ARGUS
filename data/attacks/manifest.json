@@ -1,20 +1,35 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "datasets": [
     {
       "attack_type": "data_extraction",
       "path": "data_extraction/partial_leakage/payloads.json",
-      "sha256": "2879348f7db40b01ec03d43f30f23ad7b2dd42a702accc9e6522e4580688c975"
+      "sha256": "52d279704e9bcdb55005e4c3ed88734b1d78c6b21ff592124c8d984eaa3b25f4"
+    },
+    {
+      "attack_type": "data_extraction",
+      "path": "data_extraction/encoded_leakage/payloads.json",
+      "sha256": "c9cdc5acd147e7afcfffcd48b7e5ff3d41e7700c9fbac557548127e2ca860837"
     },
     {
       "attack_type": "jailbreaks",
       "path": "jailbreaks/hypothetical_scenarios/payloads.json",
-      "sha256": "08053c2115d418e813b5e7e3d3bac25a11ba39e3b49a4ec624d739bd1791ef95"
+      "sha256": "8af06027cf22812c8540c86d9b245209b2ffa1b7a1baf3e234be08848c67f118"
     },
     {
       "attack_type": "prompt_injection",
       "path": "prompt_injection/direct_system_override/payloads.json",
-      "sha256": "9fb8ff12ec084721d5f99ee640fc04eee931dde487487fa779f539bd5ccf8e65"
+      "sha256": "69d3370545c99eec9f8a10c07691275ca67d2c4c00acddfb530b5c5d97f795e8"
+    },
+    {
+      "attack_type": "prompt_injection",
+      "path": "prompt_injection/encoded_context/payloads.json",
+      "sha256": "09f71df03c76fffb6717ff6dada66ab12a8f41f74960707bec1f05bf6040e214"
+    },
+    {
+      "attack_type": "indirect_prompt_injection",
+      "path": "indirect_prompt_injection/retrieved_document/payloads.json",
+      "sha256": "c79265b6d0493eb5ef2c8601fe6ac24e8689fd9f5aed50070f85af8167e24674"
     }
   ]
 }

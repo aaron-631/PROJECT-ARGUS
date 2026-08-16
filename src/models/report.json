@@ -3,6 +3,13 @@
     "AttackResult": {
       "additionalProperties": false,
       "properties": {
+        "atlas_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Atlas Ids",
+          "type": "array"
+        },
         "attack_type": {
           "minLength": 1,
           "title": "Attack Type",
@@ -12,6 +19,13 @@
           "additionalProperties": true,
           "title": "Canonical Result",
           "type": "object"
+        },
+        "cwe_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Cwe Ids",
+          "type": "array"
         },
         "error": {
           "anyOf": [
@@ -51,6 +65,11 @@
           "default": null,
           "title": "Judge Score"
         },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
         "module_id": {
           "minLength": 1,
           "title": "Module Id",
@@ -60,6 +79,13 @@
           "default": "1.0.0",
           "title": "Module Version",
           "type": "string"
+        },
+        "owasp_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Owasp Ids",
+          "type": "array"
         },
         "payload": {
           "minLength": 1,
@@ -95,6 +121,13 @@
     "Finding": {
       "additionalProperties": false,
       "properties": {
+        "atlas_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Atlas Ids",
+          "type": "array"
+        },
         "base_score": {
           "default": 1.0,
           "maximum": 10.0,
@@ -107,6 +140,13 @@
           "minimum": 0.0,
           "title": "Confidence Score",
           "type": "number"
+        },
+        "cwe_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Cwe Ids",
+          "type": "array"
         },
         "deployment_context": {
           "default": "default",
@@ -140,6 +180,13 @@
           ],
           "default": null,
           "title": "Line"
+        },
+        "owasp_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Owasp Ids",
+          "type": "array"
         },
         "remediation": {
           "default": "",
@@ -198,7 +245,7 @@
           "type": "string"
         },
         "dataset_version": {
-          "default": "1.0.0",
+          "default": "1.1.0",
           "title": "Dataset Version",
           "type": "string"
         },

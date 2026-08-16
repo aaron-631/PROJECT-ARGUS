@@ -21,6 +21,7 @@ python3 -m venv .venv
 .venv/bin/pip install -e .
 .venv/bin/argus doctor
 .venv/bin/argus audit --target ./config --output ./reports/first-run
+.venv/bin/python examples/indirect-injection/run_demo.py
 ```
 
 Open `reports/first-run/report.md`. `PASS` means no configured rule crossed the
@@ -32,6 +33,9 @@ For the complete proof-of-concept, use [POC.md](POC.md). For the architecture,
 code walkthrough, decisions, tradeoffs, interview preparation, and limits, use
 [WORKFLOW.md](WORKFLOW.md). The compact architecture diagram is in
 [docs/architecture.md](docs/architecture.md).
+The formal OWASP LLM/Agentic, MITRE ATLAS, and CWE matrix is in
+[docs/coverage.md](docs/coverage.md); reproducible safe/vulnerable/RAG evidence
+is in [evidence/benchmark/README.md](evidence/benchmark/README.md).
 
 The fastest safe portfolio demo after installation is:
 
@@ -52,7 +56,7 @@ explicitly authorized the pinned MCP demo server.
 | Test an authorized live LLM endpoint | `argus audit --target PATH --endpoint URL ...` | Bounded behavior probes |
 | Inspect a live MCP server | `argus mcp-probe --transport ... --confirm-live` | `initialize` + paginated `tools/list`; zero tool calls |
 | Protect deployed model traffic | `docker-compose.runtime.yml` | Runtime allow/block/redact gateway |
-| List available security rules | `argus rules` | View active rules; add `--verbose` for full descriptions |
+| List available security rules | `argus rules --compliance` | View active rules plus OWASP/ATLAS/CWE mappings |
 
 Detailed guides: [static and dynamic testing](WORKFLOW.md#6-real-time-dynamic-testing),
 [live MCP discovery](WORKFLOW.md#live-read-only-mcp-discovery),
@@ -68,7 +72,10 @@ Detailed guides: [static and dynamic testing](WORKFLOW.md#6-real-time-dynamic-te
 ```
 
 Argus checks source, JSON/YAML/TOML/Python, secrets, shell execution, MCP
-servers, tool schemas, permissions, egress, TLS, unpinned packages, and skills.
+servers, tool schemas, permissions, egress, TLS, unpinned packages, skills,
+and explicit RAG trust-boundary/output-validation settings. Its dynamic modules
+also include indirect prompt-injection probes that carry retrieved context and
+detect dangerous tool proposals.
 
 **Language scope.** Configuration rules (JSON/YAML/TOML) and text/secret rules
 are language-agnostic. Code-execution rules (`ARGUS_ST_003`, `ARGUS_ST_007`) use
@@ -219,14 +226,14 @@ acceptance procedure is in [POC.md](POC.md).
 | Evidence | Recorded result |
 | --- | --- |
 | Installable CLI | Editable package install succeeded; `argus` and `argus-runtime` help commands work |
-| Automated quality gate | 80 tests passed; Black, Flake8, mypy, and schema checks passed |
+| Automated quality gate | Full pytest, Black, Flake8, mypy, and schema checks run in CI |
 | SARIF export | GitHub-compatible `report.sarif` with stable rule IDs, locations, severity, and fingerprints |
 | Current deployment smoke | Claude global settings `BLOCK` on 1 CRITICAL credential finding; Claude local/Codex/Gemini configs `PASS`; empty Gemini MCP registry `ERROR` |
 | Real MCP server | Official pinned filesystem server: 14 tools, 1 page, 0 tool calls, 2 HIGH findings, `BLOCK` |
 | Baseline gate | Existing findings remain visible while new or escalated risk returns exit code `10` |
 | Evidence bundle | [Sanitized recorded MCP result](evidence/real-mcp/README.md) with provenance and hashes |
 | Compatibility and supply chain | Cross-platform CI matrix, dependency audit/SBOM, and Docker image advisory scan |
-| Performance smoke run | Static: 4 files in 0.016s; real MCP discovery: 14 tools in 1.834s warm or 70.655s latest cold with `npx` startup |
+| Performance smoke run | Safe benchmark: 2 files in 0.016s; real MCP discovery: 14 tools in 1.016s warm; cold `npx` startup is host-dependent |
 | Runtime POC | The repository CI/Compose workflow is configured to verify health, `403` prompt blocking, forwarding, metrics, and sanitized audit events |
 
 The real MCP evidence is documented in [WORKFLOW.md](WORKFLOW.md#661-real-world-verification-run).
@@ -234,21 +241,23 @@ The reports to retain as proof are `report.md`, `report.json`, and `report.sarif
 `runtime-audit/events.jsonl`. Record the OS, Python/Node versions, package
 versions, command, timestamp, and whether each endpoint was mock or real.
 
-For GitHub Code Scanning, upload the generated SARIF artifact from CI:
+The CI workflow already uploads `reports/ci/report.sarif` to GitHub Code
+Scanning on pushes and same-repository pull requests. If you add the step to a
+different workflow, use the same path:
 
 ```yaml
 - uses: github/codeql-action/upload-sarif@v3
   if: always()
   with:
-    sarif_file: reports/first-run/report.sarif
+    sarif_file: reports/ci/report.sarif
 ```
 
 <details>
-<summary>Captured real Argus run — 2026-08-04</summary>
+<summary>Captured real Argus run — 2026-08-16</summary>
 
 Environment: Linux workspace, Python 3.14.4, Node.js v24.15.0, npm 11.16.0,
-source commit `7b9a22f` (the later `main` update only refreshed this evidence
-wording; executable code was unchanged).
+source baseline commit `f1cae6a`, from the `feature/argus-taxonomy-indirect-injection`
+working tree.
 
 ```text
 $ .venv/bin/argus mcp-probe \
@@ -260,7 +269,7 @@ $ .venv/bin/argus mcp-probe \
 [Argus] Decision: BLOCK
 [Argus] MCP transport: stdio; tools discovered: 14
 [Argus] Tool calls: 0 (read-only discovery)
-[Argus] Performance: 70.655s
+[Argus] Performance: 1.016s
 [Argus] Report written: /tmp/argus-current-main-real-mcp/report.json
 [Argus] Report written: /tmp/argus-current-main-real-mcp/report.md
 [Argus] Report written: /tmp/argus-current-main-real-mcp/report.sarif

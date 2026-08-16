@@ -11,6 +11,7 @@ from src.core.rate_limiter import TokenBucketRateLimiter, parse_retry_after
 from src.core.sanitization import sanitize, sanitize_value
 from src.core.registry import get_enabled_modules, plugin_errors
 from src.core.target_client import HTTPTargetClient, TargetClient, resolve_api_key
+from src.core.taxonomy import coverage_summary, taxonomy_for_attack, taxonomy_for_rule
 from src.interfaces.judge import HTTPJudgeBackend, MockJudgeBackend, NullJudgeBackend
 from src.models import SEVERITY_ORDER, AttackResult, Finding, ScanContext
 from src.models.config import ArgusConfig
@@ -67,6 +68,16 @@ class ArgusEngine:
         if disabled:
             self._suppressed_rules = sorted({f.rule_id for f in findings if f.rule_id in disabled})
             findings = [f for f in findings if f.rule_id not in disabled]
+        findings = [
+            item.model_copy(
+                update={
+                    "owasp_ids": item.owasp_ids or list(taxonomy_for_rule(item.rule_id).owasp_ids),
+                    "atlas_ids": item.atlas_ids or list(taxonomy_for_rule(item.rule_id).atlas_ids),
+                    "cwe_ids": item.cwe_ids or list(taxonomy_for_rule(item.rule_id).cwe_ids),
+                }
+            )
+            for item in findings
+        ]
         return sorted(
             findings, key=lambda item: (item.rule_id, item.source_file or "", item.line or 0)
         )
@@ -109,7 +120,13 @@ class ArgusEngine:
                     client = self.target_client
                     if client is None:
                         raise RuntimeError("target client is not configured")
-                    response = await client.send(probe["payload"], attack_type=module.module_id)
+                    send_probe = getattr(client, "send_probe", None)
+                    if callable(send_probe):
+                        response = await send_probe(probe, attack_type=module.module_id)
+                    else:
+                        # Existing custom TargetClient implementations remain
+                        # valid; only the built-in adapter consumes metadata.
+                        response = await client.send(probe["payload"], attack_type=module.module_id)
                     response_status = response.status_code
                     response_text = response.text
                     if response.status_code != 429 and response.status_code < 500:
@@ -139,6 +156,7 @@ class ArgusEngine:
                     f"HTTP {response_status} after {self.config.engine.max_retries + 1} attempts"
                 )
             if response_status == 0 and not response_text:
+                taxonomy = taxonomy_for_attack(module.module_id)
                 return AttackResult(
                     module_id=module.module_id,
                     module_version=module.version,
@@ -149,10 +167,21 @@ class ArgusEngine:
                     canonical_result={"attack_succeeded": False, "signals": []},
                     evaluation_methodology="canonical_only",
                     error=error or "request failed",
+                    owasp_ids=list(taxonomy.owasp_ids),
+                    atlas_ids=list(taxonomy.atlas_ids),
+                    cwe_ids=list(taxonomy.cwe_ids),
+                    metadata=self._probe_metadata(probe),
                 )
             evaluation = await evaluator.evaluate(
-                response_text, {"attack_type": module.attack_type, "status_code": response_status}
+                response_text,
+                {
+                    "attack_type": module.attack_type,
+                    "status_code": response_status,
+                    "source_channel": probe.get("metadata", {}).get("source_channel"),
+                    "tool_calls": getattr(response, "tool_calls", []),
+                },
             )
+            taxonomy = taxonomy_for_attack(module.module_id)
             return AttackResult(
                 module_id=module.module_id,
                 module_version=module.version,
@@ -166,7 +195,32 @@ class ArgusEngine:
                 risk_score=evaluation["risk_score"],
                 evaluation_methodology=evaluation["evaluation_methodology"],
                 error=error,
+                owasp_ids=list(taxonomy.owasp_ids),
+                atlas_ids=list(taxonomy.atlas_ids),
+                cwe_ids=list(taxonomy.cwe_ids),
+                metadata=self._probe_metadata(probe),
             )
+
+    @staticmethod
+    def _probe_metadata(probe: dict[str, Any]) -> dict[str, Any]:
+        """Keep context provenance while preventing retrieved text in reports."""
+
+        metadata = probe.get("metadata", {})
+        if not isinstance(metadata, dict):
+            return {}
+        result: dict[str, Any] = {}
+        source_channel = metadata.get("source_channel")
+        if isinstance(source_channel, str):
+            result["source_channel"] = source_channel[:80]
+        documents = metadata.get("retrieved_documents")
+        if isinstance(documents, list) and all(isinstance(item, str) for item in documents):
+            joined = "\n\n".join(documents)
+            result["retrieved_document_count"] = len(documents)
+            result["retrieved_context_sha256"] = sha256(joined.encode("utf-8")).hexdigest()
+        dataset_version_value = metadata.get("dataset_version")
+        if isinstance(dataset_version_value, str):
+            result["dataset_version"] = dataset_version_value
+        return result
 
     async def _run_attacks(
         self, context: ScanContext, registry: dict[str, dict[str, type[Any]]]
@@ -248,6 +302,17 @@ class ArgusEngine:
         )
         dynamic_errors = sum(bool(item.error) for item in attack_results)
         execution_errors = [*context.document_errors, *self._errors, *plugin_errors()]
+        available_rule_ids = sorted(
+            {
+                rule_id
+                for scanner_cls in registry["scanners"].values()
+                for rule_id in getattr(scanner_cls, "rule_capabilities", {})
+            }
+        )
+        compliance = coverage_summary(
+            available_rule_ids,
+            sorted({item.module_id for item in attack_results}),
+        )
         decision = "ERROR" if dynamic_errors or execution_errors else "BLOCK" if blocked else "PASS"
         return {
             "metadata": {
@@ -280,6 +345,7 @@ class ArgusEngine:
                 "suppressed_rules": list(self._suppressed_rules),
                 "fail_on": self.config.reporting.fail_on,
                 "decision": decision,
+                "compliance_coverage": compliance,
                 **inventory,
             },
             "evaluation_methodology": methodology,

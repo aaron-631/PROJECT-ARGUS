@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from src.core.registry import register_scanner
 from src.core.documents import parse_file
+from src.core.taxonomy import taxonomy_for_rule
 from src.models import Finding, ScanContext, Severity
 from src.interfaces.scanner import BaseStaticScanner
 from src.models.documents import DocumentKind, ParsedDocument
@@ -208,6 +209,20 @@ _RULES: dict[str, tuple[Severity, str, str, float, str]] = {
         "A discovered skill has no adjacent origin, integrity, or verification metadata that ties it to a reviewed source.",  # noqa: E501
         5.0,
         "Verify the skill with the source registry or a signed internal artifact, record its version/digest, and review updates before enabling it.",  # noqa: E501
+    ),
+    "ARGUS_ST_028": (
+        Severity.HIGH,
+        "Retrieved context lacks a trust boundary",
+        "A RAG, vector, or knowledge-base source is configured without an explicit untrusted-content or provenance control.",  # noqa: E501
+        7.5,
+        "Mark retrieved content as untrusted, validate provenance, and isolate it from tool instructions before model execution.",  # noqa: E501
+    ),
+    "ARGUS_ST_029": (
+        Severity.HIGH,
+        "Tool output is trusted without validation",
+        "Configuration explicitly forwards tool output without validation or sanitization before it re-enters model context.",  # noqa: E501
+        7.0,
+        "Validate tool output against a typed schema and treat returned text as untrusted context.",  # noqa: E501
     ),
 }
 
@@ -598,6 +613,9 @@ class MCPScanner(BaseStaticScanner):
                     risk_score=round(base_score * context.context_multiplier * 0.92, 3),
                     evaluation_methodology="deterministic_static",
                     remediation=remediation,
+                    owasp_ids=list(taxonomy_for_rule(rule_id).owasp_ids),
+                    atlas_ids=list(taxonomy_for_rule(rule_id).atlas_ids),
+                    cwe_ids=list(taxonomy_for_rule(rule_id).cwe_ids),
                 )
             )
 
@@ -886,6 +904,77 @@ class MCPScanner(BaseStaticScanner):
                     name = str(value.get("name", location))
                     description = str(value.get("description", ""))
                     combined = f"{name} {description} {json.dumps(value, default=str)}"
+                    normalized_location = location.rsplit(".", 1)[-1].split("[", 1)[0].lower()
+                    retrieval_containers = {
+                        "rag",
+                        "retrieval",
+                        "retriever",
+                        "vector_store",
+                        "vector_database",
+                        "embedding_store",
+                        "knowledge_base",
+                    }
+                    retrieval_sources = {
+                        "url",
+                        "endpoint",
+                        "index",
+                        "collection",
+                        "database",
+                        "documents",
+                        "retriever",
+                        "vector_store",
+                        "embedding_model",
+                    }
+                    retrieval_controls = {
+                        "trust_boundary",
+                        "untrusted_context",
+                        "content_filter",
+                        "sanitize_documents",
+                        "validate_documents",
+                        "provenance_required",
+                        "signed_documents",
+                        "allowlisted_sources",
+                    }
+                    if (
+                        self._supports("ARGUS_ST_028", path, parsed_document)
+                        and normalized_location in retrieval_containers
+                        and any(
+                            str(key).lower().replace("-", "_") in retrieval_sources for key in value
+                        )
+                        and not any(
+                            str(key).lower().replace("-", "_") in retrieval_controls
+                            for key in value
+                        )
+                    ):
+                        add(
+                            "ARGUS_ST_028",
+                            path,
+                            {
+                                "key_path": location,
+                                "source_keys": sorted(
+                                    str(key)
+                                    for key in value
+                                    if str(key).lower().replace("-", "_") in retrieval_sources
+                                ),
+                            },
+                            _line_for(raw, normalized_location),
+                        )
+                    for key, child in value.items():
+                        normalized_key = str(key).lower().replace("-", "_")
+                        explicitly_unvalidated = (
+                            normalized_key
+                            in {"validate_tool_output", "sanitize_output", "output_validation"}
+                            and child is False
+                        ) or (normalized_key == "trust_tool_output" and child is True)
+                        if explicitly_unvalidated and self._supports(
+                            "ARGUS_ST_029", path, parsed_document
+                        ):
+                            add(
+                                "ARGUS_ST_029",
+                                path,
+                                {"key_path": location + "." + str(key), "value": child},
+                                _line_for(raw, str(key)),
+                            )
                     for key, child in value.items():
                         if str(key).lower().replace("-", "_") in {
                             "pass_env",

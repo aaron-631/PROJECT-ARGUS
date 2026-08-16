@@ -35,5 +35,5 @@ def test_retry_exhaustion_is_bounded_and_reported() -> None:
         return await ArgusEngine(config, target).run(ingest_local("config"))
 
     result = asyncio.run(run())
-    assert target.calls == 3 * 3
+    assert target.calls == 12 * 3
     assert all(item["error"].startswith("HTTP 503") for item in result["attack_results"])

@@ -1,6 +1,7 @@
 {
   "evidence_type": "redacted_recorded_run",
-  "source_commit": "7b9a22f",
+  "source_baseline_commit": "f1cae6a",
+  "source_branch": "feature/argus-taxonomy-indirect-injection",
   "server_package": "@modelcontextprotocol/server-filesystem@2026.7.10",
   "transport": "stdio",
   "protocol_version": "2025-06-18",
@@ -24,10 +25,10 @@
       "remediation": "Add human approval immediately before the side effect and validate the tool arguments against a strict schema."
     }
   ],
-  "elapsed_seconds": 70.655,
+  "elapsed_seconds": 1.016,
   "artifact_sha256": {
-    "report.json": "bf6525df89b11da537fd08c4a4b6fa9cf91ea9800c7d8400ec261f8f0da948b8",
-    "report.md": "c435a8a1c973db8d019df0287bc52b9675b289652530cfcbea08762d50aa8c63",
-    "report.sarif": "b43dbdb789cc08cd24bfae8dd1b0908cd5ffd48bd34f58aad431503967eb5b5e"
+    "report.json": "0a7490dd380f07f9d1e62067948cf2b0194912d2a46a8dd0c01f238b3c4ad46c",
+    "report.md": "3444135b5a4e4ce114d2d00b16f7c427b416badc44ec5f1c4a72d4277d62ad4d",
+    "report.sarif": "95a29133a6323473e615b6bc83f03bc5ac70cf88dca98e6fb809fabbc95abc30"
   }
 }

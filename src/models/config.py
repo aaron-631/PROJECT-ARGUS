@@ -81,13 +81,18 @@ class ArgusConfig(ConfigModel):
     # Empty selects every registered scanner, including entry-point plugins.
     scanners: list[str] = Field(default_factory=list)
     attacks: list[str] = Field(
-        default_factory=lambda: ["prompt_injection", "jailbreak", "data_extraction"]
+        default_factory=lambda: [
+            "prompt_injection",
+            "jailbreak",
+            "data_extraction",
+            "indirect_prompt_injection",
+        ]
     )
     enabled_modules: dict[str, list[str]] = Field(default_factory=dict)
     disabled_modules: list[str] = Field(default_factory=list)
     disabled_rules: list[str] = Field(default_factory=list)
     target_endpoint: str | None = None
-    dataset_version: str = "1.0.0"
+    dataset_version: str = "1.1.0"
 
     def as_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")

@@ -10,14 +10,37 @@ from typing import Any
 
 from src.models import ScanReport
 from src.core.sanitization import sanitize_value
+from src.core.taxonomy import taxonomy_for_attack, taxonomy_for_rule
 from src.interfaces.exporter import BaseExporter
 
 
 def build_report(results: dict[str, Any] | ScanReport) -> ScanReport:
-    if isinstance(results, ScanReport):
-        return results
-    clean = sanitize_value(results)
-    return ScanReport.model_validate(clean)
+    report = (
+        results
+        if isinstance(results, ScanReport)
+        else ScanReport.model_validate(sanitize_value(results))
+    )
+    findings = [
+        item.model_copy(
+            update={
+                "owasp_ids": item.owasp_ids or list(taxonomy_for_rule(item.rule_id).owasp_ids),
+                "atlas_ids": item.atlas_ids or list(taxonomy_for_rule(item.rule_id).atlas_ids),
+                "cwe_ids": item.cwe_ids or list(taxonomy_for_rule(item.rule_id).cwe_ids),
+            }
+        )
+        for item in report.findings
+    ]
+    attacks = [
+        item.model_copy(
+            update={
+                "owasp_ids": item.owasp_ids or list(taxonomy_for_attack(item.module_id).owasp_ids),
+                "atlas_ids": item.atlas_ids or list(taxonomy_for_attack(item.module_id).atlas_ids),
+                "cwe_ids": item.cwe_ids or list(taxonomy_for_attack(item.module_id).cwe_ids),
+            }
+        )
+        for item in report.attack_results
+    ]
+    return report.model_copy(update={"findings": findings, "attack_results": attacks})
 
 
 def validate_contracts(report: ScanReport) -> None:
@@ -84,6 +107,29 @@ class MarkdownExporter(BaseExporter):
             f"Maximum risk: **{report.summary.get('max_risk', 0)} / 10**",
             "",
         ]
+        compliance = report.summary.get("compliance_coverage")
+        if isinstance(compliance, dict):
+            lines.extend(["## Standards coverage", ""])
+            owasp_llm = compliance.get("owasp_llm", {})
+            owasp_agentic = compliance.get("owasp_agentic", {})
+            atlas = compliance.get("mitre_atlas", {})
+            if isinstance(owasp_llm, dict):
+                lines.append(
+                    f"- OWASP LLM Top 10 ({owasp_llm.get('edition', 'unknown')}): tested "
+                    f"`{', '.join(owasp_llm.get('tested', [])) or 'none'}`; not covered "
+                    f"`{', '.join(owasp_llm.get('not_covered', [])) or 'none'}`"
+                )
+            if isinstance(owasp_agentic, dict):
+                lines.append(
+                    f"- OWASP Agentic ({owasp_agentic.get('edition', 'unknown')}): tested "
+                    f"`{', '.join(owasp_agentic.get('tested', [])) or 'none'}`; not covered "
+                    f"`{', '.join(owasp_agentic.get('not_covered', [])) or 'none'}`"
+                )
+            if isinstance(atlas, dict):
+                lines.append(
+                    f"- MITRE ATLAS mappings: `{', '.join(atlas.get('mapped', [])) or 'none'}`"
+                )
+            lines.append("")
         performance = report.summary.get("performance")
         if isinstance(performance, dict):
             lines.extend(["## Performance", ""])
@@ -122,6 +168,9 @@ class MarkdownExporter(BaseExporter):
                     f"- Evidence: `{finding.source_file or 'n/a'}` line `{finding.line or 'n/a'}`",
                     f"- Risk: **{finding.risk_score} / 10**; confidence: **{finding.confidence_score}**",  # noqa: E501
                     f"- Methodology: `{finding.evaluation_methodology}`",
+                    f"- OWASP: `{', '.join(finding.owasp_ids) or 'unmapped'}`; ATLAS: "
+                    f"`{', '.join(finding.atlas_ids) or 'unmapped'}`; CWE: "
+                    f"`{', '.join(finding.cwe_ids) or 'not assigned'}`",
                     "",
                     f"**Remediation:** {finding.remediation or 'Review the evidence and apply a least-privilege control.'}",  # noqa: E501
                     "",
@@ -141,6 +190,16 @@ class MarkdownExporter(BaseExporter):
                     f"- Canonical outcome: **{outcome}**",
                     f"- Risk: **{result.risk_score} / 10**",
                     f"- Methodology: `{result.evaluation_methodology}`",
+                    f"- OWASP: `{', '.join(result.owasp_ids) or 'unmapped'}`; ATLAS: "
+                    f"`{', '.join(result.atlas_ids) or 'unmapped'}`; CWE: "
+                    f"`{', '.join(result.cwe_ids) or 'not assigned'}`",
+                    (
+                        f"- Source channel: `{result.metadata.get('source_channel')}`; "
+                        f"retrieved documents: "
+                        f"`{result.metadata.get('retrieved_document_count', 0)}`"
+                        if result.metadata.get("source_channel")
+                        else ""
+                    ),
                     "",
                 ]
             )
@@ -262,6 +321,10 @@ class SARIFExporter(BaseExporter):
                         "security-severity": f"{finding.risk_score:.2f}",
                         "severity": finding.severity.value,
                         "evaluation_methodology": finding.evaluation_methodology,
+                        "owasp_ids": finding.owasp_ids,
+                        "atlas_ids": finding.atlas_ids,
+                        "cwe_ids": finding.cwe_ids,
+                        "tags": [*finding.owasp_ids, *finding.atlas_ids, *finding.cwe_ids],
                     },
                 },
             )
@@ -281,6 +344,9 @@ class SARIFExporter(BaseExporter):
                     "confidence_score": finding.confidence_score,
                     "deployment_context": finding.deployment_context,
                     "evaluation_methodology": finding.evaluation_methodology,
+                    "owasp_ids": finding.owasp_ids,
+                    "atlas_ids": finding.atlas_ids,
+                    "cwe_ids": finding.cwe_ids,
                 },
             }
             sarif_results.append(result)
@@ -310,6 +376,10 @@ class SARIFExporter(BaseExporter):
                     "properties": {
                         "security-severity": f"{attack.risk_score:.2f}",
                         "category": "dynamic-security-test",
+                        "owasp_ids": attack.owasp_ids,
+                        "atlas_ids": attack.atlas_ids,
+                        "cwe_ids": attack.cwe_ids,
+                        "tags": [*attack.owasp_ids, *attack.atlas_ids, *attack.cwe_ids],
                     },
                 },
             )
@@ -326,6 +396,9 @@ class SARIFExporter(BaseExporter):
                     "properties": {
                         "risk_score": attack.risk_score,
                         "evaluation_methodology": attack.evaluation_methodology,
+                        "owasp_ids": attack.owasp_ids,
+                        "atlas_ids": attack.atlas_ids,
+                        "cwe_ids": attack.cwe_ids,
                     },
                 }
             )
@@ -349,6 +422,7 @@ class SARIFExporter(BaseExporter):
                         "decision": report.summary.get("decision", "UNKNOWN"),
                         "fail_on": report.summary.get("fail_on", "HIGH"),
                         "scan_id": report.metadata.scan_id,
+                        "compliance_coverage": report.summary.get("compliance_coverage", {}),
                     },
                 }
             ],

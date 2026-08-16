@@ -65,6 +65,8 @@ RULE_CAPABILITIES: dict[str, RuleCapability] = {
     "ARGUS_ST_025": RuleCapability("ARGUS_ST_025", frozenset(), PATTERN, "pattern"),
     "ARGUS_ST_026": RuleCapability("ARGUS_ST_026", frozenset(), PATTERN, "pattern"),
     "ARGUS_ST_027": RuleCapability("ARGUS_ST_027", frozenset(), PATTERN, "pattern"),
+    "ARGUS_ST_028": RuleCapability("ARGUS_ST_028", CONFIG_EXTENSIONS, STRUCTURED, "structured"),
+    "ARGUS_ST_029": RuleCapability("ARGUS_ST_029", CONFIG_EXTENSIONS, STRUCTURED, "structured"),
 }
 
 
