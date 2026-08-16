@@ -14,11 +14,12 @@ import aiohttp
 from aiohttp import web
 
 from .approval import ApprovalClient
-from .audit import AuditWriter
+from .audit import AuditStorageError, AuditWriter
 from .audit_sink import AuditSink
 from .config import RuntimeConfig
 from .metrics import RuntimeMetrics
 from .policy import RuntimePolicy
+from .limiter import RuntimeRateLimiter
 
 
 class RuntimeGateway:
@@ -43,6 +44,7 @@ class RuntimeGateway:
                 config.approval_service_url,
                 config.approval_service_token_env,
                 config.approval_service_timeout_seconds,
+                config.max_body_bytes,
             )
             if config.approval_service_url
             else None
@@ -58,6 +60,8 @@ class RuntimeGateway:
             else None
         )
         self._audit_ship_tasks: set[asyncio.Task[bool]] = set()
+        self._request_semaphore = asyncio.Semaphore(config.max_concurrent_requests)
+        self._rate_limiter = RuntimeRateLimiter(config.rate_limit_rps, config.rate_limit_burst)
 
     async def start(self) -> None:
         if self.session is None:
@@ -103,24 +107,38 @@ class RuntimeGateway:
         self.metrics.observe_redaction(redaction_count)
         if upstream_status is not None:
             self.metrics.observe_upstream(upstream_status)
-        record = self.audit.write(
-            {
-                "event_type": "runtime_request",
-                "request_id": request_id,
-                "decision": decision,
-                "reason_codes": reason_codes,
-                "tool_names": tool_names or [],
-                "status_code": status_code,
-                "upstream_status": upstream_status,
-                "latency_ms": round((perf_counter() - started) * 1000, 3),
-                "redaction_count": redaction_count,
-                "metadata": metadata or {},
-            }
-        )
-        if self.audit_sink is not None and self.session is not None:
+        try:
+            record = self.audit.write(
+                {
+                    "event_type": "runtime_request",
+                    "request_id": request_id,
+                    "decision": decision,
+                    "reason_codes": reason_codes,
+                    "tool_names": tool_names or [],
+                    "status_code": status_code,
+                    "upstream_status": upstream_status,
+                    "latency_ms": round((perf_counter() - started) * 1000, 3),
+                    "redaction_count": redaction_count,
+                    "metadata": metadata or {},
+                }
+            )
+        except AuditStorageError:
+            raise
+        except OSError as exc:
+            raise AuditStorageError("runtime audit storage failed") from exc
+        if (
+            self.audit_sink is not None
+            and self.session is not None
+            and len(self._audit_ship_tasks) < self.config.max_audit_ship_tasks
+        ):
             task = asyncio.create_task(self.audit_sink.publish(self.session, record))
             self._audit_ship_tasks.add(task)
             task.add_done_callback(self._audit_ship_done)
+        elif (
+            self.audit_sink is not None
+            and len(self._audit_ship_tasks) >= self.config.max_audit_ship_tasks
+        ):
+            self.metrics.observe_admission_rejection("AUDIT_SHIP_QUEUE_FULL")
 
     async def _policy_response(
         self,
@@ -132,15 +150,29 @@ class RuntimeGateway:
         tool_names: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> web.Response:
-        self._audit(
-            request_id,
-            decision,
-            reason_codes,
-            status_code,
-            started,
-            tool_names,
-            metadata=metadata,
-        )
+        try:
+            self._audit(
+                request_id,
+                decision,
+                reason_codes,
+                status_code,
+                started,
+                tool_names,
+                metadata=metadata,
+            )
+        except AuditStorageError:
+            self.metrics.observe_audit_failure()
+            return web.json_response(
+                {
+                    "error": {
+                        "type": "argus_audit_unavailable",
+                        "message": "Argus could not durably record this decision",
+                        "request_id": request_id,
+                    }
+                },
+                status=503,
+                headers={"X-Argus-Decision": "block", "X-Request-ID": request_id},
+            )
         message = "Request blocked by Argus runtime policy"
         if decision == "review":
             message = "Human approval is required by Argus runtime policy"
@@ -229,6 +261,23 @@ class RuntimeGateway:
     async def handle_messages(self, request: web.Request) -> web.Response:
         started = perf_counter()
         request_id = self._request_id(request)
+        if not self._rate_limiter.allow():
+            self.metrics.observe_admission_rejection("RATE_LIMITED")
+            return await self._policy_response(request_id, "block", ["RATE_LIMITED"], 429, started)
+        if self._request_semaphore.locked():
+            self.metrics.observe_admission_rejection("CONCURRENCY_LIMIT")
+            return await self._policy_response(
+                request_id, "block", ["CONCURRENCY_LIMIT"], 429, started
+            )
+        await self._request_semaphore.acquire()
+        try:
+            return await self._handle_messages(request)
+        finally:
+            self._request_semaphore.release()
+
+    async def _handle_messages(self, request: web.Request) -> web.Response:
+        started = perf_counter()
+        request_id = self._request_id(request)
         if self.session is None:
             await self.start()
         auth_failure = self._client_auth_failure(request)
@@ -299,7 +348,11 @@ class RuntimeGateway:
                 data=raw_body,
                 headers=self._forward_headers(request),
             ) as upstream:
-                response_bytes = await upstream.read()
+                content = getattr(upstream, "content", None)
+                if content is not None and callable(getattr(content, "read", None)):
+                    response_bytes = await content.read(self.config.max_body_bytes + 1)
+                else:
+                    response_bytes = await upstream.read()
                 if len(response_bytes) > self.config.max_body_bytes:
                     self.metrics.observe_error()
                     return await self._policy_response(
@@ -443,6 +496,19 @@ class RuntimeGateway:
             return web.json_response(
                 {"error": {"type": "argus_upstream_timeout", "request_id": request_id}},
                 status=504,
+                headers={"X-Argus-Decision": "block", "X-Request-ID": request_id},
+            )
+        except AuditStorageError:
+            self.metrics.observe_audit_failure()
+            return web.json_response(
+                {
+                    "error": {
+                        "type": "argus_audit_unavailable",
+                        "message": "Argus could not durably record this decision",
+                        "request_id": request_id,
+                    }
+                },
+                status=503,
                 headers={"X-Argus-Decision": "block", "X-Request-ID": request_id},
             )
         except aiohttp.ClientError:

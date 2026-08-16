@@ -1,11 +1,11 @@
 repos:
   - repo: https://github.com/psf/black
-    rev: '24.4.2'
+    rev: '3702ba224ecffbcec30af640c149f231d90aebdb' # 24.4.2
     hooks:
       - id: black
         args: ['--target-version', 'py311']
   - repo: https://github.com/PyCQA/flake8
-    rev: '7.1.0'
+    rev: '1978e2b0de6efa0cb2a2b6f3f7986aa6569dd2be' # 7.1.0
     hooks:
       - id: flake8
   - repo: local

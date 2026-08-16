@@ -21,6 +21,28 @@ class FailingTarget:
         return None
 
 
+def test_client_errors_are_reported_without_evaluating_the_body() -> None:
+    target = FailingTarget(401)
+    base = load_config()
+    config = load_config().model_copy(
+        update={
+            "attacks": ["prompt_injection"],
+            "engine": base.engine.model_copy(update={"max_retries": 3, "backoff_base_seconds": 0}),
+        }
+    )
+
+    async def run() -> dict:
+        return await ArgusEngine(config, target).run(ingest_local("config"))
+
+    result = asyncio.run(run())
+    assert target.calls == 12
+    assert result["summary"]["decision"] == "ERROR"
+    assert all(item["error"] == "HTTP 401" for item in result["attack_results"])
+    assert all(
+        item["canonical_result"]["attack_succeeded"] is False for item in result["attack_results"]
+    )
+
+
 def test_retry_exhaustion_is_bounded_and_reported() -> None:
     target = FailingTarget(503)
     base = load_config()

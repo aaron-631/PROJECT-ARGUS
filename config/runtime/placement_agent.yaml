@@ -5,6 +5,10 @@ listen_host: 127.0.0.1
 listen_port: 8080
 max_body_bytes: 1048576
 request_timeout_seconds: 30
+max_concurrent_requests: 100
+rate_limit_rps: 50
+rate_limit_burst: 100
+max_audit_ship_tasks: 1000
 allow_buffered_streaming: false
 forward_headers:
   - accept

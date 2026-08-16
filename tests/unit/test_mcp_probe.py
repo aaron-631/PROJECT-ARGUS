@@ -5,8 +5,15 @@ import sys
 from pathlib import Path
 
 import aiohttp
+import pytest
 
-from src.core.mcp_probe import MCPProbeLimits, probe_stdio, probe_streamable_http
+from src.core.mcp_probe import (
+    MCPProbeError,
+    MCPProbeLimits,
+    _parse_sse_json,
+    probe_stdio,
+    probe_streamable_http,
+)
 
 
 def test_stdio_probe_reads_paginated_tools_without_calling_tools(
@@ -181,3 +188,9 @@ def test_streamable_http_probe_tracks_session_and_pagination(monkeypatch) -> Non
     assert requests[2]["headers"]["MCP-Protocol-Version"] == "2025-06-18"
     assert all(request["body"]["method"] != "tools/call" for request in requests)
     assert result.target == "https://mcp.example.test/mcp"
+
+
+def test_sse_parser_rejects_a_result_for_another_request() -> None:
+    body = b'data: {"jsonrpc":"2.0","id":99,"result":{}}\n\n'
+    with pytest.raises(MCPProbeError, match="requested JSON-RPC result"):
+        _parse_sse_json(body, request_id=1)

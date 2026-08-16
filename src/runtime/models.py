@@ -63,6 +63,10 @@ class RuntimeConfig(ArgusModel):
     listen_port: int = Field(default=8080, ge=1, le=65535)
     max_body_bytes: int = Field(default=1_048_576, ge=1024, le=50_000_000)
     request_timeout_seconds: float = Field(default=30.0, gt=0.0, le=600.0)
+    max_concurrent_requests: int = Field(default=100, ge=1, le=10_000)
+    rate_limit_rps: float = Field(default=50.0, gt=0.0, le=100_000.0)
+    rate_limit_burst: int = Field(default=100, ge=1, le=10_000)
+    max_audit_ship_tasks: int = Field(default=1000, ge=1, le=10_000)
     allow_buffered_streaming: bool = False
     forward_headers: list[str] = Field(
         default_factory=lambda: [

@@ -36,6 +36,10 @@ def _finding_key(finding: dict[str, Any]) -> str:
             "rule_id": finding.get("rule_id"),
             "source_file": finding.get("source_file"),
             "title": finding.get("title"),
+            # Line is part of the identity.  Without it, two findings from the
+            # same rule and file collapse into one dictionary entry and the
+            # baseline can silently hide a newly introduced occurrence.
+            "line": finding.get("line"),
             "evidence": evidence,
         },
         sort_keys=True,

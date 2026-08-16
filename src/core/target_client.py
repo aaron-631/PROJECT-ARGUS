@@ -66,7 +66,10 @@ class HTTPTargetClient:
         provider: str = "generic",
         model: str | None = None,
         api_key: str | None = None,
+        max_response_bytes: int = 2_000_000,
     ) -> None:
+        if not 1024 <= max_response_bytes <= 50_000_000:
+            raise ValueError("max_response_bytes must be between 1024 and 50000000")
         self.endpoint = endpoint
         self.timeout_seconds = timeout_seconds
         self.target = target or TargetConfig.model_validate({"provider": provider, "model": model})
@@ -75,6 +78,7 @@ class HTTPTargetClient:
         if self.provider != "generic" and not self.model:
             raise ValueError(f"target model is required for provider '{self.provider}'")
         self.headers = self._build_headers(headers or {}, api_key)
+        self.max_response_bytes = max_response_bytes
         self._session: Any = None
 
     def _build_headers(self, extra: dict[str, str], api_key: str | None) -> dict[str, str]:
@@ -215,7 +219,16 @@ class HTTPTargetClient:
         started = time.perf_counter()
         body = self._build_body(payload, attack_type, metadata)
         async with self._session.post(self.endpoint, json=body, headers=self.headers) as response:
-            raw = await response.text()
+            content = getattr(response, "content", None)
+            if content is not None and callable(getattr(content, "read", None)):
+                raw_bytes = await content.read(self.max_response_bytes + 1)
+            else:
+                # Compatibility fallback for small custom TargetClient test
+                # doubles; aiohttp responses always take the bounded branch.
+                raw_bytes = (await response.text()).encode("utf-8")
+            if len(raw_bytes) > self.max_response_bytes:
+                raise RuntimeError("target response exceeded configured size limit")
+            raw = raw_bytes.decode("utf-8", errors="replace")
             return AttackResponse(
                 status_code=response.status,
                 text=_extract_response_text(raw),
@@ -314,6 +327,10 @@ def _extract_tool_calls(raw: str) -> list[dict[str, str]]:
                 for item in output[:32]
                 if isinstance(item, dict) and item.get("type") == "function_call"
             )
+        # OpenAI Responses may also return a function_call item at the top
+        # level in lightweight gateway wrappers.
+        if data.get("type") == "function_call":
+            candidates.append(data)
         candidates.extend(data.get("tool_calls", []) or [])
         single = data.get("tool_call")
         if single is not None:

@@ -20,6 +20,7 @@ class EngineConfig(ConfigModel):
     max_file_size_bytes: int = Field(default=1_048_576, ge=1024)
     max_files: int = Field(default=5000, ge=1, le=1_000_000)
     max_total_size_bytes: int = Field(default=100_000_000, ge=1024, le=10_000_000_000)
+    max_http_response_bytes: int = Field(default=2_000_000, ge=1024, le=50_000_000)
 
 
 class JudgeConfig(ConfigModel):

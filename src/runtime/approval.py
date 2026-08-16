@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -22,10 +23,13 @@ class ApprovalResult:
 class ApprovalClient:
     """Call an external approval service without sending prompts or raw secrets."""
 
-    def __init__(self, url: str, token_env: str, timeout_seconds: float) -> None:
+    def __init__(
+        self, url: str, token_env: str, timeout_seconds: float, max_response_bytes: int = 1_048_576
+    ) -> None:
         self.url = url
         self.token_env = token_env
         self.timeout_seconds = timeout_seconds
+        self.max_response_bytes = max_response_bytes
 
     async def authorize(
         self,
@@ -52,8 +56,17 @@ class ApprovalClient:
             ) as response:
                 if response.status < 200 or response.status >= 300:
                     return ApprovalResult(False, reason_code="APPROVAL_SERVICE_DENIED")
-                result = await response.json()
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                content = getattr(response, "content", None)
+                if content is not None and callable(getattr(content, "read", None)):
+                    raw = await content.read(self.max_response_bytes + 1)
+                elif callable(getattr(response, "text", None)):
+                    raw = (await response.text()).encode("utf-8")
+                else:
+                    raw = json.dumps(await response.json()).encode("utf-8")
+                if len(raw) > self.max_response_bytes:
+                    return ApprovalResult(False, reason_code="APPROVAL_SERVICE_UNAVAILABLE")
+                result = json.loads(raw.decode("utf-8"))
+        except (aiohttp.ClientError, asyncio.TimeoutError, UnicodeDecodeError, ValueError):
             return ApprovalResult(False, reason_code="APPROVAL_SERVICE_UNAVAILABLE")
         if not isinstance(result, dict) or result.get("approved") is not True:
             return ApprovalResult(False, reason_code="APPROVAL_SERVICE_DENIED")

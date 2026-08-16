@@ -230,7 +230,10 @@ python3 -m venv .venv
 .venv/bin/pip install -e .
 ```
 
-`requirements.lock` pins the verified direct and transitive dependency graph.
+`requirements.lock` pins the verified direct and transitive dependency graph and
+includes PyPI SHA-256 hashes for the exact version artifacts. Pip therefore
+rejects an artifact that is not in the lock. Use `requirements.txt` instead when
+you deliberately want flexible lower bounds.
 Use `requirements.txt` instead when you deliberately want flexible lower
 bounds. Run the environment check before the first scan:
 
@@ -318,6 +321,12 @@ from the current host, not universal benchmarks.
 ## 6. Real-time dynamic testing
 
 “Real time” means that Argus is running while an HTTP endpoint is running. Argus sends one HTTP request for each attack payload and evaluates the response as it arrives.
+
+Only successful `2xx` responses are evaluated. Authentication, permission, quota,
+and other `4xx` responses become explicit dynamic errors; `429` and `5xx`
+responses are retried within the configured bound. Provider and judge bodies are
+bounded by `engine.max_http_response_bytes`, so a live endpoint cannot make the
+scanner retain an unlimited response.
 
 ### 6.1 Use the repository's deterministic mock endpoint
 
@@ -935,7 +944,7 @@ review → stop and require an approved retry
 
 ### Audit and monitoring
 
-Each request writes a sanitized JSONL event to `runtime-audit/events.jsonl` by default. It records request ID, decision, reason codes, tool names, status, latency, upstream status, and redaction count—not the prompt or model response. Events contain a previous-hash and event-hash chain; set `ARGUS_RUNTIME_AUDIT_KEY` to add an HMAC for stronger authenticity. On startup, an existing chain is verified before append; a corrupt or HMAC-protected chain without its key fails closed instead of silently restarting at `GENESIS`. Writes flush and `fsync` the event before the request is considered audited.
+Each request writes a sanitized JSONL event to `runtime-audit/events.jsonl` by default. It records request ID, decision, reason codes, tool names, status, latency, upstream status, and redaction count—not the prompt or model response. Events contain a previous-hash and event-hash chain; set `ARGUS_RUNTIME_AUDIT_KEY` to add an HMAC for stronger authenticity. On startup, an existing chain is verified before append; a corrupt or HMAC-protected chain without its key fails closed instead of silently restarting at `GENESIS`. Writes flush and `fsync` the event before the request is considered audited. If local audit storage fails, Argus returns `503 argus_audit_unavailable` rather than forwarding an unaudited request.
 
 Inspect live counters:
 
@@ -944,7 +953,7 @@ curl -s http://127.0.0.1:8080/metrics
 tail -f runtime-audit/events.jsonl
 ```
 
-The counters cover allow/block/review/redact decisions, upstream status families, transport errors, and redactions. A production deployment should scrape `/metrics` into Prometheus and alert on spikes in blocks, upstream errors, or redactions.
+The counters cover allow/block/review/redact decisions, upstream status families, transport errors, redactions, admission rate/concurrency rejections, audit failures, and remote audit shipping failures. The gateway applies an in-process concurrency limit and token-bucket rate limit before upstream; remote audit publishing is also bounded so a slow collector cannot create an unlimited task queue. A production deployment should scrape `/metrics` into Prometheus and alert on spikes in blocks, upstream errors, audit failures, or admission rejections.
 
 The append-only audit file can be checked before it is archived:
 
@@ -1009,6 +1018,9 @@ The supported deployment variables are:
 | `ARGUS_RUNTIME_LISTEN_HOST` / `PORT` | Direct-process bind overrides | `0.0.0.0` / `8080` |
 | `ARGUS_RUNTIME_MAX_BODY_BYTES` | Request and response size limit | `1048576` |
 | `ARGUS_RUNTIME_TIMEOUT_SECONDS` | Upstream timeout | `30` |
+| `ARGUS_RUNTIME_MAX_CONCURRENT_REQUESTS` | Maximum active gateway requests | `100`; lower it for small model capacity |
+| `ARGUS_RUNTIME_RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | In-process admission token bucket | `50` / `100`; set below the upstream quota |
+| `ARGUS_RUNTIME_MAX_AUDIT_SHIP_TASKS` | Bound remote audit delivery tasks | `1000`; local audit remains the durable first write |
 | `ARGUS_RUNTIME_ALLOW_BUFFERED_STREAMING` | Permit `stream: true`, but buffer it fully before returning | `false` |
 | `ARGUS_RUNTIME_FORWARD_HEADERS` | Comma-separated upstream header allowlist override | `authorization,x-api-key,anthropic-version` |
 
@@ -1144,6 +1156,7 @@ engine:
   max_file_size_bytes: 1048576
   max_files: 5000
   max_total_size_bytes: 100000000
+  max_http_response_bytes: 2000000
 judge:
   backend: NullJudgeBackend
 reporting:
@@ -1167,6 +1180,7 @@ Important configuration knobs:
 | `engine.max_retries` | Retry count for transient failures | Keep bounded so a broken endpoint cannot hang CI |
 | `engine.max_files` | Maximum candidate files in one source target | Lower it when scanning untrusted or resource-constrained inputs |
 | `engine.max_total_size_bytes` | Aggregate candidate-file byte limit | Keep it below the scan worker's memory/disk budget |
+| `engine.max_http_response_bytes` | Maximum model or judge response body | Keep it bounded for provider and CI resource safety |
 | `reporting.formats` | `json`, `markdown`, `sarif`, or any combination | Keep JSON/Markdown for review and SARIF for Code Scanning |
 | `reporting.fail_on` | Default CI severity gate | Use `HIGH` for a strict deployment gate |
 | `judge.backend` | Null, mock, or HTTP judge selection | Keep `NullJudgeBackend` for deterministic private scans |
@@ -2008,7 +2022,7 @@ These are honest V1 limits, not hidden failures:
 | A hosted dashboard or multi-tenant service | Local-first operation keeps the security boundary small |
 | Guaranteed model safety | A finite payload set cannot prove safety against every future attack |
 | Automatic encryption of every report | Sanitized reports and the separate vault utility have different responsibilities |
-| Fully dynamic third-party plugin discovery | Scanners and attack modules load from entry points, but exporters and judges are still selected directly by the CLI |
+| Fully dynamic third-party plugin discovery | Scanners and attack modules load and execute from entry points; exporters and judges are discovered for future wiring but the CLI currently selects its built-ins directly |
 
 Say these limits confidently in an interview. A clear boundary is evidence of engineering judgment.
 
@@ -2118,7 +2132,7 @@ class PlacementDataLeakModule(BaseAttackModule):
         return {"attack_succeeded": leaked, "signals": ["student contact data"] if leaked else []}
 ```
 
-Then import it in `discover_builtin_modules()` and add it to the enabled attack list. In the current V1 engine, the module's `probes()` are used by orchestration while `EvaluationPipeline` remains the single canonical evaluator. This is a deliberate consistency choice, but it is also a place that could be redesigned in a future version if each module needs fully custom scoring.
+Then import it in `discover_builtin_modules()` and add it to the enabled attack list. Third-party attack modules may provide either `probes()` or `probe_stream()`; Argus validates both through `AttackProbe`. `EvaluationPipeline` remains the single canonical evaluator so every module gets the same normalization and scoring behavior. The legacy `evaluate_canonical()` method is retained for source compatibility but is intentionally not called.
 
 ### 18.3 Add a custom target for tests
 

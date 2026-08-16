@@ -28,6 +28,14 @@ class RuntimeMetrics:
         with self._lock:
             self._counts["audit_ship_failures_total"] += 1
 
+    def observe_audit_failure(self) -> None:
+        with self._lock:
+            self._counts["audit_failures_total"] += 1
+
+    def observe_admission_rejection(self, reason: str) -> None:
+        with self._lock:
+            self._counts[f"admission_rejections_total|{reason}"] += 1
+
     def observe_redaction(self, count: int) -> None:
         if count:
             with self._lock:
@@ -66,11 +74,23 @@ class RuntimeMetrics:
                 "# TYPE argus_runtime_audit_ship_failures_total counter",
                 "argus_runtime_audit_ship_failures_total "
                 f"{values.get('audit_ship_failures_total', 0)}",
+                "# HELP argus_runtime_audit_failures_total Local audit write failures.",
+                "# TYPE argus_runtime_audit_failures_total counter",
+                f"argus_runtime_audit_failures_total {values.get('audit_failures_total', 0)}",
+                "# HELP argus_runtime_admission_rejections_total "
+                "Requests rejected before upstream.",
+                "# TYPE argus_runtime_admission_rejections_total counter",
                 "# HELP argus_runtime_redactions_total Redacted output values.",
                 "# TYPE argus_runtime_redactions_total counter",
                 f"argus_runtime_redactions_total {values.get('redactions_total', 0)}",
             ]
         )
+        for key, value in sorted(values.items()):
+            if key.startswith("admission_rejections_total|"):
+                reason = key.split("|", 1)[1].replace('"', '\\"')
+                lines.append(
+                    f'argus_runtime_admission_rejections_total{{reason="{reason}"}} {value}'
+                )
         return "\n".join(lines) + "\n"
 
 

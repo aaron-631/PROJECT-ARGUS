@@ -256,7 +256,7 @@ Scanning on pushes and same-repository pull requests. If you add the step to a
 different workflow, use the same path:
 
 ```yaml
-- uses: github/codeql-action/upload-sarif@v4
+- uses: github/codeql-action/upload-sarif@988661ebb5e81487b3fb31b2185d2856c0a10679 # v4
   if: always()
   with:
     sarif_file: reports/ci/report.sarif
@@ -266,8 +266,8 @@ different workflow, use the same path:
 <summary>Captured real Argus run — 2026-08-16</summary>
 
 Environment: Linux/WSL2 workspace, Python 3.14.4, Node.js v24.15.0, npm 11.16.0.
-The source baseline commit is recorded in the linked evidence record after the
-remediation branch is merged to `main`.
+The source commit for this recorded run is stored in the linked evidence record;
+rerun the command before presenting a newer release as current evidence.
 
 ```text
 $ .venv/bin/argus mcp-probe \

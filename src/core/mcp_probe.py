@@ -353,7 +353,7 @@ async def probe_stdio(
         await session.close()
 
 
-def _parse_sse_json(body: bytes) -> dict[str, Any]:
+def _parse_sse_json(body: bytes, request_id: int | None = None) -> dict[str, Any]:
     text = body.decode("utf-8", errors="strict")
     data_lines: list[str] = []
     messages: list[dict[str, Any]] = []
@@ -377,12 +377,18 @@ def _parse_sse_json(body: bytes) -> dict[str, Any]:
         if isinstance(message, dict):
             messages.append(message)
     for message in messages:
-        if "result" in message or "error" in message:
+        if ("result" in message or "error" in message) and (
+            request_id is None or message.get("id") == request_id
+        ):
             return message
+    if request_id is not None:
+        raise MCPProbeError("MCP SSE response did not contain the requested JSON-RPC result")
     raise MCPProbeError("MCP SSE response did not contain a JSON-RPC result")
 
 
-async def _read_sse_result(response: aiohttp.ClientResponse, max_bytes: int) -> dict[str, Any]:
+async def _read_sse_result(
+    response: aiohttp.ClientResponse, max_bytes: int, request_id: int
+) -> dict[str, Any]:
     """Read an SSE response until the requested JSON-RPC result arrives."""
 
     buffer = b""
@@ -405,11 +411,15 @@ async def _read_sse_result(response: aiohttp.ClientResponse, max_bytes: int) -> 
             event = buffer[:position]
             buffer = buffer[position + separator_length :]
             try:
-                return _parse_sse_json(event)
-            except MCPProbeError:
+                return _parse_sse_json(event, request_id)
+            except MCPProbeError as exc:
+                # A proxy may send unrelated JSON-RPC events in the same
+                # stream. Continue until the response for this request.
+                if "requested JSON-RPC result" not in str(exc):
+                    raise
                 continue
     if buffer:
-        return _parse_sse_json(buffer)
+        return _parse_sse_json(buffer, request_id)
     raise MCPProbeError("MCP SSE response did not contain a JSON-RPC result")
 
 
@@ -452,7 +462,9 @@ class _HTTPStreamableSession:
                     self.session_id = session_id
                 content_type = response.headers.get("Content-Type", "").lower()
                 if "text/event-stream" in content_type:
-                    message = await _read_sse_result(response, self.limits.max_response_bytes)
+                    message = await _read_sse_result(
+                        response, self.limits.max_response_bytes, request_id
+                    )
                 else:
                     raw = await response.content.read(self.limits.max_response_bytes + 1)
                     if len(raw) > self.limits.max_response_bytes:
@@ -471,6 +483,8 @@ class _HTTPStreamableSession:
             raise MCPProbeError(f"MCP HTTP request failed: {type(exc).__name__}") from exc
         if not isinstance(message, dict):
             raise MCPProbeError("MCP HTTP response was not a JSON-RPC object")
+        if message.get("id") != request_id:
+            raise MCPProbeError("MCP HTTP response id did not match the request")
         if "error" in message:
             raise MCPProbeError(f"MCP {method} request returned an error")
         result = message.get("result")

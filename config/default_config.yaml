@@ -11,6 +11,7 @@ engine:
   max_file_size_bytes: 1048576
   max_files: 5000
   max_total_size_bytes: 100000000
+  max_http_response_bytes: 2000000
 
 judge:
   backend: "NullJudgeBackend"  # Default: no external calls

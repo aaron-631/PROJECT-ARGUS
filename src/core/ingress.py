@@ -28,6 +28,7 @@ class SkippableFileError(IngressError):
 DEFAULT_MAX_FILE_SIZE = 1_048_576
 DEFAULT_MAX_FILES = 5_000
 DEFAULT_MAX_TOTAL_SIZE = 100_000_000
+DEFAULT_MAX_GIT_TREE_BYTES = 50_000_000
 _IGNORED_DIRS = {
     ".git",
     ".hg",
@@ -314,6 +315,76 @@ def _is_git_url(value: str) -> bool:
     return parsed.scheme in {"http", "https", "ssh", "git"} and bool(parsed.netloc)
 
 
+def _validate_git_tree(
+    clone_path: Path, max_file_size: int, max_files: int, max_total_size: int
+) -> None:
+    """Stream ``ls-tree`` output so a huge metadata listing cannot fill memory."""
+
+    process = subprocess.Popen(
+        ["git", "-C", str(clone_path), "ls-tree", "-r", "-l", "-z", "HEAD"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    buffer = b""
+    output_bytes = 0
+    files_seen = 0
+    total_size = 0
+    try:
+        assert process.stdout is not None
+        while True:
+            chunk = process.stdout.read(64 * 1024)
+            if not chunk:
+                break
+            output_bytes += len(chunk)
+            if output_bytes > DEFAULT_MAX_GIT_TREE_BYTES:
+                process.kill()
+                process.wait()
+                raise IngressError("Git tree listing exceeded the configured metadata limit")
+            buffer += chunk
+            while b"\0" in buffer:
+                entry, buffer = buffer.split(b"\0", 1)
+                if not entry:
+                    continue
+                header, separator, _path = entry.partition(b"\t")
+                if not separator:
+                    raise IngressError("Git tree listing was malformed")
+                fields = header.decode("ascii", errors="strict").split()
+                if len(fields) < 4 or fields[1] != "blob":
+                    continue
+                size = fields[3]
+                if size == "-":
+                    raise IngressError("Git server did not provide bounded blob sizes")
+                try:
+                    blob_size = int(size)
+                except ValueError as exc:
+                    raise IngressError("Git tree contained an invalid blob size") from exc
+                if blob_size > max_file_size:
+                    raise IngressError(f"Git repository contains a file over {max_file_size} bytes")
+                files_seen += 1
+                total_size += blob_size
+                if files_seen > max_files:
+                    raise IngressError(f"Git repository contains more than {max_files} files")
+                if total_size > max_total_size:
+                    raise IngressError(f"Git repository exceeds {max_total_size} total file bytes")
+        if buffer:
+            raise IngressError("Git tree listing was malformed")
+        stderr = (process.stderr.read() if process.stderr is not None else b"").decode(
+            "utf-8", errors="replace"
+        )
+        try:
+            return_code = process.wait(timeout=60)
+        except subprocess.TimeoutExpired as exc:
+            process.kill()
+            process.wait()
+            raise IngressError("Git tree listing timed out") from exc
+        if return_code != 0:
+            raise IngressError(f"Git tree listing failed: {stderr.strip()[-500:]}")
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+
+
 def ingest_git(
     repo_url: str,
     max_file_size: int = DEFAULT_MAX_FILE_SIZE,
@@ -355,39 +426,7 @@ def ingest_git(
                 "Git server does not support filtered clones; use a local checkout "
                 "to keep repository limits enforceable"
             )
-        tree = subprocess.run(
-            ["git", "-C", str(clone_path), "ls-tree", "-r", "-l", "-z", "HEAD"],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=60,
-        ).stdout
-        files_seen = 0
-        total_size = 0
-        for entry in tree.split(b"\0"):
-            if not entry:
-                continue
-            header, separator, _path = entry.partition(b"\t")
-            if not separator:
-                raise IngressError("Git tree listing was malformed")
-            fields = header.decode("ascii", errors="strict").split()
-            if len(fields) < 4 or fields[1] != "blob":
-                continue
-            size = fields[3]
-            if size == "-":
-                raise IngressError("Git server did not provide bounded blob sizes")
-            try:
-                blob_size = int(size)
-            except ValueError as exc:
-                raise IngressError("Git tree contained an invalid blob size") from exc
-            if blob_size > max_file_size:
-                raise IngressError(f"Git repository contains a file over {max_file_size} bytes")
-            files_seen += 1
-            total_size += blob_size
-            if files_seen > max_files:
-                raise IngressError(f"Git repository contains more than {max_files} files")
-            if total_size > max_total_size:
-                raise IngressError(f"Git repository exceeds {max_total_size} total file bytes")
+        _validate_git_tree(clone_path, max_file_size, max_files, max_total_size)
         subprocess.run(
             ["git", "-C", str(clone_path), "checkout", "--force", "HEAD", "--", "."],
             check=True,

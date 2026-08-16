@@ -5,6 +5,23 @@ lightweight Keep a Changelog style; releases are versioned in `pyproject.toml`.
 
 ## [Unreleased]
 
+### Security
+
+- Baseline identities now include finding locations, so duplicate occurrences
+  cannot collapse into an accepted baseline.
+- Dynamic scans treat non-2xx provider responses as explicit errors and bound
+  target and judge response bodies.
+- Report sanitization removes URL credentials/query strings and all header values;
+  MCP responses are correlated to their JSON-RPC request IDs.
+- Runtime admission now has bounded concurrency/rate/audit-shipping controls,
+  and audit storage failures fail closed with a structured `503` response.
+
+### Delivery
+
+- Entry-point attack plugins can stream probes and use the shared evaluator.
+- GitHub Actions are pinned to immutable commit SHAs and the dependency lock
+  contains hashes for every published artifact of each exact version.
+
 ## [0.2.0] - 2026-08-16
 
 ### Security

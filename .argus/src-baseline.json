@@ -4,10 +4,11 @@
     "attacks": [
       "prompt_injection",
       "jailbreak",
-      "data_extraction"
+      "data_extraction",
+      "indirect_prompt_injection"
     ],
     "c_env": 0.5,
-    "dataset_version": "1.0.0",
+    "dataset_version": "1.1.0",
     "deployment_context": "human_in_loop",
     "description": "",
     "disabled_modules": [],
@@ -17,7 +18,10 @@
       "backoff_base_seconds": 0.25,
       "max_concurrent_attacks": 10,
       "max_file_size_bytes": 1048576,
+      "max_files": 5000,
+      "max_http_response_bytes": 2000000,
       "max_retries": 3,
+      "max_total_size_bytes": 100000000,
       "rate_limit_rps": 5.0,
       "timeout_seconds": 30.0
     },
@@ -30,15 +34,13 @@
     },
     "profile": "default",
     "reporting": {
-      "fail_on": "HIGH",
+      "fail_on": "CRITICAL",
       "formats": [
         "json"
       ],
       "output_dir": "./reports"
     },
-    "scanners": [
-      "mcp_scanner"
-    ],
+    "scanners": [],
     "target": {
       "api_key_env": null,
       "auth_header": null,
@@ -59,8 +61,15 @@
   "evaluation_methodology": "canonical_only",
   "findings": [
     {
+      "atlas_ids": [
+        "AML.T0049"
+      ],
       "base_score": 10.0,
       "confidence_score": 0.92,
+      "cwe_ids": [
+        "CWE-78",
+        "CWE-95"
+      ],
       "deployment_context": "human_in_loop",
       "description": "Dynamic evaluation or subprocess execution is reachable from scanned code without a verifiable strict argument boundary.",
       "evaluation_methodology": "deterministic_static",
@@ -69,6 +78,10 @@
         "file": "core/doctor.py"
       },
       "line": 25,
+      "owasp_ids": [
+        "LLM05",
+        "ASI05"
+      ],
       "remediation": "Remove eval/exec; use an allowlisted operation map and fixed subprocess arguments.",
       "risk_score": 4.6,
       "rule_id": "ARGUS_ST_003",
@@ -77,16 +90,27 @@
       "title": "Unsafe code execution"
     },
     {
+      "atlas_ids": [
+        "AML.T0049"
+      ],
       "base_score": 10.0,
       "confidence_score": 0.92,
+      "cwe_ids": [
+        "CWE-78",
+        "CWE-95"
+      ],
       "deployment_context": "human_in_loop",
       "description": "Dynamic evaluation or subprocess execution is reachable from scanned code without a verifiable strict argument boundary.",
       "evaluation_methodology": "deterministic_static",
       "evidence": {
-        "call": "subprocess.run",
+        "call": "subprocess.Popen",
         "file": "core/ingress.py"
       },
-      "line": 194,
+      "line": 323,
+      "owasp_ids": [
+        "LLM05",
+        "ASI05"
+      ],
       "remediation": "Remove eval/exec; use an allowlisted operation map and fixed subprocess arguments.",
       "risk_score": 4.6,
       "rule_id": "ARGUS_ST_003",
@@ -95,8 +119,15 @@
       "title": "Unsafe code execution"
     },
     {
+      "atlas_ids": [
+        "AML.T0049"
+      ],
       "base_score": 10.0,
       "confidence_score": 0.92,
+      "cwe_ids": [
+        "CWE-78",
+        "CWE-95"
+      ],
       "deployment_context": "human_in_loop",
       "description": "Dynamic evaluation or subprocess execution is reachable from scanned code without a verifiable strict argument boundary.",
       "evaluation_methodology": "deterministic_static",
@@ -104,7 +135,69 @@
         "call": "subprocess.run",
         "file": "core/ingress.py"
       },
-      "line": 215,
+      "line": 403,
+      "owasp_ids": [
+        "LLM05",
+        "ASI05"
+      ],
+      "remediation": "Remove eval/exec; use an allowlisted operation map and fixed subprocess arguments.",
+      "risk_score": 4.6,
+      "rule_id": "ARGUS_ST_003",
+      "severity": "CRITICAL",
+      "source_file": "core/ingress.py",
+      "title": "Unsafe code execution"
+    },
+    {
+      "atlas_ids": [
+        "AML.T0049"
+      ],
+      "base_score": 10.0,
+      "confidence_score": 0.92,
+      "cwe_ids": [
+        "CWE-78",
+        "CWE-95"
+      ],
+      "deployment_context": "human_in_loop",
+      "description": "Dynamic evaluation or subprocess execution is reachable from scanned code without a verifiable strict argument boundary.",
+      "evaluation_methodology": "deterministic_static",
+      "evidence": {
+        "call": "subprocess.run",
+        "file": "core/ingress.py"
+      },
+      "line": 430,
+      "owasp_ids": [
+        "LLM05",
+        "ASI05"
+      ],
+      "remediation": "Remove eval/exec; use an allowlisted operation map and fixed subprocess arguments.",
+      "risk_score": 4.6,
+      "rule_id": "ARGUS_ST_003",
+      "severity": "CRITICAL",
+      "source_file": "core/ingress.py",
+      "title": "Unsafe code execution"
+    },
+    {
+      "atlas_ids": [
+        "AML.T0049"
+      ],
+      "base_score": 10.0,
+      "confidence_score": 0.92,
+      "cwe_ids": [
+        "CWE-78",
+        "CWE-95"
+      ],
+      "deployment_context": "human_in_loop",
+      "description": "Dynamic evaluation or subprocess execution is reachable from scanned code without a verifiable strict argument boundary.",
+      "evaluation_methodology": "deterministic_static",
+      "evidence": {
+        "call": "subprocess.run",
+        "file": "core/ingress.py"
+      },
+      "line": 447,
+      "owasp_ids": [
+        "LLM05",
+        "ASI05"
+      ],
       "remediation": "Remove eval/exec; use an allowlisted operation map and fixed subprocess arguments.",
       "risk_score": 4.6,
       "rule_id": "ARGUS_ST_003",
@@ -114,32 +207,132 @@
     }
   ],
   "metadata": {
-    "argus_version": "1.0.0",
-    "dataset_version": "1.0.0",
+    "argus_version": "0.2.0",
+    "dataset_version": "1.1.0",
     "profile": "default",
-    "scan_id": "067c79cbeba683b5",
+    "scan_id": "ba1520ee884934e8",
     "schema_version": "1.0",
-    "source": "./src",
+    "source": "/home/aaron631/PROJECT-ARGUS/src",
     "source_type": "local"
   },
   "summary": {
     "attack_count": 0,
-    "critical_count": 3,
+    "compliance_coverage": {
+      "attack_modules": [],
+      "cwe": {
+        "mapped": [
+          "CWE-1104",
+          "CWE-20",
+          "CWE-200",
+          "CWE-22",
+          "CWE-250",
+          "CWE-295",
+          "CWE-319",
+          "CWE-400",
+          "CWE-502",
+          "CWE-668",
+          "CWE-78",
+          "CWE-798",
+          "CWE-835",
+          "CWE-862",
+          "CWE-95"
+        ]
+      },
+      "mitre_atlas": {
+        "mapped": [
+          "AML.T0046",
+          "AML.T0048",
+          "AML.T0049",
+          "AML.T0051",
+          "AML.T0051.001",
+          "AML.T0052"
+        ],
+        "reference": "live-matrix"
+      },
+      "owasp_agentic": {
+        "edition": "2026",
+        "not_covered": [
+          "ASI07",
+          "ASI09",
+          "ASI10"
+        ],
+        "tested": [
+          "ASI01",
+          "ASI02",
+          "ASI03",
+          "ASI04",
+          "ASI05",
+          "ASI06",
+          "ASI08"
+        ]
+      },
+      "owasp_llm": {
+        "edition": "2025",
+        "not_covered": [
+          "LLM07",
+          "LLM09"
+        ],
+        "tested": [
+          "LLM01",
+          "LLM02",
+          "LLM03",
+          "LLM04",
+          "LLM05",
+          "LLM06",
+          "LLM08",
+          "LLM10"
+        ]
+      },
+      "rule_ids": [
+        "ARGUS_ST_001",
+        "ARGUS_ST_002",
+        "ARGUS_ST_003",
+        "ARGUS_ST_004",
+        "ARGUS_ST_005",
+        "ARGUS_ST_006",
+        "ARGUS_ST_007",
+        "ARGUS_ST_008",
+        "ARGUS_ST_009",
+        "ARGUS_ST_010",
+        "ARGUS_ST_011",
+        "ARGUS_ST_012",
+        "ARGUS_ST_013",
+        "ARGUS_ST_014",
+        "ARGUS_ST_015",
+        "ARGUS_ST_016",
+        "ARGUS_ST_017",
+        "ARGUS_ST_018",
+        "ARGUS_ST_019",
+        "ARGUS_ST_020",
+        "ARGUS_ST_021",
+        "ARGUS_ST_022",
+        "ARGUS_ST_023",
+        "ARGUS_ST_024",
+        "ARGUS_ST_025",
+        "ARGUS_ST_026",
+        "ARGUS_ST_027",
+        "ARGUS_ST_028",
+        "ARGUS_ST_029"
+      ]
+    },
+    "critical_count": 5,
     "decision": "BLOCK",
     "dynamic_error_count": 0,
     "error_count": 0,
     "errors": [],
-    "fail_on": "HIGH",
-    "finding_count": 3,
+    "fail_on": "CRITICAL",
+    "finding_count": 5,
+    "gate_decision": "BLOCK",
     "high_count": 0,
     "max_risk": 4.6,
     "mcp_servers": [],
     "mcp_tools": [],
+    "overall_decision": "BLOCK",
     "performance": {
-      "elapsed_seconds": 0.177,
-      "evaluation_seconds": 0.085,
-      "files_scanned": 59,
-      "ingest_seconds": 0.09,
+      "elapsed_seconds": 0.128,
+      "evaluation_seconds": 0.064,
+      "files_scanned": 62,
+      "ingest_seconds": 0.062,
       "operation": "scan"
     },
     "skills": [],

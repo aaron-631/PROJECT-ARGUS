@@ -71,3 +71,20 @@ def test_baseline_rejects_non_argus_json(tmp_path: Path) -> None:
 
     with pytest.raises(BaselineError):
         apply_baseline(_report([]), path)
+
+
+def test_baseline_does_not_collapse_duplicate_rule_occurrences(tmp_path: Path) -> None:
+    baseline_finding = _finding("ARGUS_ST_003")
+    baseline_finding["line"] = 10
+    current_first = {**baseline_finding, "line": 10}
+    current_second = {**baseline_finding, "line": 20}
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps(_report([baseline_finding])), encoding="utf-8")
+    current = _report([current_first, current_second])
+
+    apply_baseline(current, baseline_path)
+
+    comparison = current["summary"]["baseline"]
+    assert comparison["gate"] == "BLOCK"
+    assert comparison["new_finding_count"] == 1
+    assert comparison["unchanged_finding_count"] == 1

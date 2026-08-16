@@ -13,7 +13,7 @@ from src.core.registry import get_enabled_modules, plugin_errors
 from src.core.target_client import HTTPTargetClient, TargetClient, resolve_api_key
 from src.core.taxonomy import coverage_summary, taxonomy_for_attack, taxonomy_for_rule
 from src.interfaces.judge import HTTPJudgeBackend, MockJudgeBackend, NullJudgeBackend
-from src.models import SEVERITY_ORDER, AttackResult, Finding, ScanContext
+from src.models import SEVERITY_ORDER, AttackProbe, AttackResult, Finding, ScanContext
 from src.models.config import ArgusConfig
 from src.modules.attacks.dataset import dataset_version
 from src import __version__
@@ -48,6 +48,7 @@ class ArgusEngine:
                 api_key=api_key,
                 headers=self.config.judge.headers,
                 timeout_seconds=self.config.engine.timeout_seconds,
+                max_response_bytes=self.config.engine.max_http_response_bytes,
             )
         return NullJudgeBackend()
 
@@ -130,13 +131,18 @@ class ArgusEngine:
                         response = await client.send(probe["payload"], attack_type=module.module_id)
                     response_status = response.status_code
                     response_text = response.text
-                    if response.status_code != 429 and response.status_code < 500:
+                    if 200 <= response.status_code < 300:
                         error = None
+                        break
+                    if response.status_code != 429 and response.status_code < 500:
+                        error = f"HTTP {response.status_code}"
                         break
                     if response.status_code == 429:
                         retry_after = parse_retry_after(response.headers.get("Retry-After"))
                         limiter.penalize(min(max(retry_after, 0.0), 60.0))
-                    if attempt < self.config.engine.max_retries:
+                    if attempt < self.config.engine.max_retries and (
+                        response.status_code == 429 or response.status_code >= 500
+                    ):
                         await asyncio.sleep(
                             min(
                                 60.0,
@@ -156,7 +162,9 @@ class ArgusEngine:
                 error = error or (
                     f"HTTP {response_status} after {self.config.engine.max_retries + 1} attempts"
                 )
-            if response_status == 0 and not response_text:
+            elif response_status and not 200 <= response_status < 300:
+                error = f"HTTP {response_status}"
+            if error or (response_status == 0 and not response_text):
                 taxonomy = taxonomy_for_attack(module.module_id)
                 return AttackResult(
                     module_id=module.module_id,
@@ -243,6 +251,7 @@ class ArgusEngine:
                 self.config.engine.timeout_seconds,
                 target=self.config.target,
                 api_key=resolve_api_key(self.config.target),
+                max_response_bytes=self.config.engine.max_http_response_bytes,
             )
         limiter = TokenBucketRateLimiter(self.config.engine.rate_limit_rps)
         semaphore = asyncio.Semaphore(self.config.engine.max_concurrent_attacks)
@@ -250,14 +259,46 @@ class ArgusEngine:
         tasks = []
         for module_cls in registry["attack_modules"].values():
             module = module_cls()
-            for probe in module.probes():
-                tasks.append(
-                    self._attack_one(
-                        module, probe.model_dump(mode="json"), limiter, semaphore, evaluator
-                    )
+            try:
+                probes = await self._module_probes(module, endpoint)
+            except Exception as exc:
+                detail = sanitize(" ".join(str(exc).split()))[:300]
+                self._errors.append(
+                    f"attack module {module.module_id}: {type(exc).__name__}: {detail}"
                 )
+                continue
+            for probe in probes:
+                tasks.append(self._attack_one(module, probe, limiter, semaphore, evaluator))
         results = await asyncio.gather(*tasks) if tasks else []
         return sorted(results, key=lambda item: (item.module_id, item.payload_id))
+
+    @staticmethod
+    async def _module_probes(module: Any, endpoint: str | None) -> list[dict[str, Any]]:
+        """Load built-in and entry-point probes through one validated contract."""
+
+        raw_probes = list(module.probes())
+        # Built-ins expose a synchronous dataset.  Entry-point plugins commonly
+        # implement the documented async stream instead, so an empty sync list
+        # falls back to it.
+        if not raw_probes:
+            stream = module.probe_stream(endpoint)
+            async for raw in stream:
+                raw_probes.append(raw)
+        normalized: list[dict[str, Any]] = []
+        for raw in raw_probes:
+            if isinstance(raw, AttackProbe):
+                normalized.append(raw.model_dump(mode="json"))
+                continue
+            if isinstance(raw, dict):
+                candidate = dict(raw)
+                # Accept the older plugin example's ``prompt`` spelling while
+                # keeping AttackProbe as the canonical public schema.
+                if "payload" not in candidate and isinstance(candidate.get("prompt"), str):
+                    candidate["payload"] = candidate.pop("prompt")
+                normalized.append(AttackProbe.model_validate(candidate).model_dump(mode="json"))
+                continue
+            raise TypeError(f"attack module emitted unsupported probe type: {type(raw).__name__}")
+        return normalized
 
     async def run(self, scan_context: ScanContext) -> dict[str, Any]:
         self._errors = []

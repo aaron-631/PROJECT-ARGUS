@@ -18,6 +18,10 @@ class AuditIntegrityError(RuntimeError):
     """Raised when an existing audit chain cannot be trusted."""
 
 
+class AuditStorageError(RuntimeError):
+    """Raised when an event cannot be durably appended."""
+
+
 class AuditWriter:
     """Write one sanitized JSON object per line without storing prompts or responses."""
 
@@ -69,11 +73,14 @@ class AuditWriter:
                     hashlib.sha256,
                 ).hexdigest()
             line = json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n"
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a", encoding="utf-8") as handle:
-                handle.write(line)
-                handle.flush()
-                os.fsync(handle.fileno())
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                with self.path.open("a", encoding="utf-8") as handle:
+                    handle.write(line)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except OSError as exc:
+                raise AuditStorageError(f"unable to append audit event: {self.path}") from exc
             self._previous_hash = event_hash
         return record
 
@@ -125,4 +132,4 @@ class AuditWriter:
         return True
 
 
-__all__ = ["AuditIntegrityError", "AuditWriter"]
+__all__ = ["AuditIntegrityError", "AuditStorageError", "AuditWriter"]

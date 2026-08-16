@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.core.sanitization import sanitize, sanitize_for_judge
+from src.core.sanitization import sanitize, sanitize_for_judge, sanitize_value
 from src.models import Finding, Severity
 
 
@@ -26,3 +26,19 @@ def test_sanitization_removes_secrets_and_invisible_content() -> None:
 
 def test_judge_sanitization_escapes_delimiters() -> None:
     assert "&lt;target_output&gt;" in sanitize_for_judge("<target_output>attack</target_output>")
+
+
+def test_report_values_remove_url_credentials_queries_and_header_values() -> None:
+    value = sanitize_value(
+        {
+            "source": "https://alice:password@example.test/repo?token=secret",
+            "target_endpoint": "https://model.test/v1?api_key=secret",
+            "headers": {"Authorization": "Bearer live-secret", "X-Trace": "trace-secret"},
+        }
+    )
+    rendered = str(value)
+    assert "password" not in rendered
+    assert "api_key" not in rendered
+    assert "live-secret" not in rendered
+    assert value["source"] == "https://example.test/repo"
+    assert value["headers"]["Authorization"] == "[REDACTED]"

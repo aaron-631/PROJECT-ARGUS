@@ -20,10 +20,16 @@ class BaseAttackModule(ABC):
         """Yields attack probes to be sent to the target."""
         ...
 
-    @abstractmethod
     def evaluate_canonical(self, response: str) -> dict[str, Any]:
-        """Deterministic result scoring — no external calls."""
-        ...
+        """Legacy hook retained for plugin compatibility.
+
+        Argus evaluates every response through the shared normalized
+        :class:`EvaluationPipeline`; module-specific evaluators are not called
+        by the engine because they could bypass normalization and safety
+        policy.  Existing plugins may still implement this method.
+        """
+
+        return {}
 
     def probes(self) -> list["AttackProbe"]:
         """Optional synchronous dataset access used by injected target clients."""

@@ -124,6 +124,48 @@ async def test_gateway_blocks_before_upstream_and_exposes_metrics(tmp_path: Path
 
 
 @pytest.mark.asyncio
+async def test_gateway_rate_limits_before_upstream(tmp_path: Path) -> None:
+    config = load_runtime_config(
+        environ={"ARGUS_RUNTIME_AUDIT_PATH": str(tmp_path / "events.jsonl")}
+    ).model_copy(update={"rate_limit_rps": 0.001, "rate_limit_burst": 1})
+    session = FakeSession(FakeResponse({"content": "ok"}))
+    gateway = RuntimeGateway(
+        config,
+        session=session,  # type: ignore[arg-type]
+        audit=AuditWriter(tmp_path / "events.jsonl"),
+    )
+    request = FakeRequest(json.dumps({"messages": [{"role": "user", "content": "hello"}]}).encode())
+
+    first = await gateway.handle_messages(request)  # type: ignore[arg-type]
+    second = await gateway.handle_messages(request)  # type: ignore[arg-type]
+
+    assert first.status == 200
+    assert second.status == 429
+    assert len(session.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_gateway_returns_service_unavailable_when_audit_write_fails() -> None:
+    class BrokenAudit:
+        def write(self, event: dict[str, Any]) -> dict[str, Any]:
+            raise OSError("read-only audit volume")
+
+    config = load_runtime_config().model_copy(update={"rate_limit_burst": 2})
+    gateway = RuntimeGateway(
+        config,
+        session=FakeSession(FakeResponse({"content": "must not run"})),  # type: ignore[arg-type]
+        audit=BrokenAudit(),  # type: ignore[arg-type]
+    )
+
+    response = await gateway.handle_messages(
+        FakeRequest(json.dumps({"messages": [{"role": "user", "content": "hello"}]}).encode())
+    )  # type: ignore[arg-type]
+
+    assert response.status == 503
+    assert b"argus_audit_unavailable" in response.body
+
+
+@pytest.mark.asyncio
 async def test_gateway_redacts_personal_data_in_upstream_response(tmp_path: Path) -> None:
     config = load_runtime_config(
         environ={"ARGUS_RUNTIME_AUDIT_PATH": str(tmp_path / "events.jsonl")}
