@@ -6,7 +6,7 @@ arguments, or tool execution results.
 
 ## Run
 
-- Source baseline commit: `8798c81b70044222176dd07223a50be0f2dd5a49`
+- Source baseline commit: `85a5ab032751d00c9f451082e5bbd5ca019ae17c`
 - Host: Linux/WSL2
 - Python: 3.14.4
 - Node.js: 24.15.0
@@ -22,7 +22,7 @@ arguments, or tool execution results.
 
 - 14 tools discovered on 1 page;
 - 2 HIGH findings;
-- 0.561 seconds on this cached `npx --offline` run; the first online startup took
+- 0.624 seconds on this cached `npx --offline` run; the first online startup took
   70.628 seconds on this host;
 - OWASP/Agentic/ATLAS metadata is present in the generated report;
 - JSON/Markdown/SARIF reports generated;

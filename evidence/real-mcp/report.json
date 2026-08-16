@@ -124,7 +124,7 @@
     }
   ],
   "metadata": {
-    "argus_version": "0.2.0",
+    "argus_version": "0.2.1",
     "dataset_version": "1.1.0",
     "profile": "default",
     "scan_id": "322ab801bd0a8dfa",
@@ -243,7 +243,7 @@
     "high_count": 2,
     "max_risk": 3.91,
     "mcp_probe": {
-      "elapsed_seconds": 0.561,
+      "elapsed_seconds": 0.624,
       "pages": 1,
       "protocol_version": "2025-06-18",
       "read_only": true,
@@ -342,7 +342,7 @@
     ],
     "overall_decision": "BLOCK",
     "performance": {
-      "elapsed_seconds": 0.561,
+      "elapsed_seconds": 0.624,
       "operation": "mcp-probe",
       "tool_count": 14
     },

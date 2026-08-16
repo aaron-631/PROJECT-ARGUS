@@ -24,7 +24,7 @@ Maximum risk: **3.91 / 10**
 ## Performance
 
 - MCP tools discovered: **14**
-- Elapsed: **0.561 seconds**
+- Elapsed: **0.624 seconds**
 
 ## Static findings
 

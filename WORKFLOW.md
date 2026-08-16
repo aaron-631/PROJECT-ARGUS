@@ -713,7 +713,7 @@ were intentionally excluded from the scan targets and evidence:
 | Gemini CLI 0.49.0 | `$HOME/.gemini/settings.json` | PASS; 0 findings |
 | Gemini MCP registry | `$HOME/.gemini/config/mcp_config.json` | ERROR; file is empty, so Argus correctly refused to call it safe |
 | OpenClaw | `$HOME/.openclaw` | Not installed in this environment; no result claimed |
-| Official MCP server 2026.7.10 | Installed `argus mcp-probe` launched `@modelcontextprotocol/server-filesystem` over stdio with one temporary directory as its only allowed root | 14 tools, 1 page, 0 tool calls; 0.561s with cached `npx --offline`; Argus returned BLOCK for 2 HIGH findings |
+| Official MCP server 2026.7.10 | Installed `argus mcp-probe` launched `@modelcontextprotocol/server-filesystem` over stdio with one temporary directory as its only allowed root | 14 tools, 1 page, 0 tool calls; 0.624s with cached `npx --offline`; Argus returned BLOCK for 2 HIGH findings |
 
 The reproducible static commands were:
 
@@ -726,7 +726,7 @@ The reproducible static commands were:
 ```
 
 The current static CLI reports were regenerated from source commit
-`8798c81b70044222176dd07223a50be0f2dd5a49` in `/tmp/argus-real-demo/real-cli-*`.
+`85a5ab032751d00c9f451082e5bbd5ca019ae17c` in `/tmp/argus-real-demo/real-cli-*`.
 The refreshed MCP report is recorded in `evidence/real-mcp/`. Retain the generated `report.json`,
 `report.md`, and `report.sarif` artifacts when repeating this on another
 machine. The empty
@@ -735,7 +735,7 @@ configuration is `ERROR` with a non-zero exit code, never a false `PASS`.
 
 The cold MCP timing includes the first `npx` package startup/download and is
 host-dependent. The recorded first online run took 70.628 seconds; the cached
-`npx --offline` run took 0.561 seconds inside Argus. Keep the 120-second timeout
+`npx --offline` run took 0.624 seconds inside Argus. Keep the 120-second timeout
 for first-run installation or preinstall the pinned server package.
 
 The MCP runtime check used the official package at a fixed version, sent only

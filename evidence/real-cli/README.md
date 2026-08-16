@@ -7,7 +7,7 @@ response is committed.
 
 Recorded: 2026-08-16 on Linux/WSL2, Python 3.14.4. Static results below were
 regenerated from Argus source commit
-`8798c81b70044222176dd07223a50be0f2dd5a49`.
+`85a5ab032751d00c9f451082e5bbd5ca019ae17c` (Argus `0.2.1`).
 
 ## Static configuration checks
 

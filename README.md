@@ -243,7 +243,7 @@ acceptance procedure is in [POC.md](POC.md).
 | Evidence bundle | [Sanitized recorded MCP result](evidence/real-mcp/README.md) with provenance and hashes |
 | Real local CLI verification | [Codex, Claude Code, Gemini CLI, and Antigravity settings](evidence/real-cli/README.md) with static and bounded live results |
 | Compatibility and supply chain | Cross-platform CI matrix, dependency audit/SBOM, and Docker image advisory scan |
-| Performance smoke run | Safe benchmark: 2 files in 0.028s; real MCP discovery: 14 tools in 0.561s with cached `npx --offline`; first `npx` startup was 70.628s on the recorded host |
+| Performance smoke run | Safe benchmark: 2 files in 0.023s; real MCP discovery: 14 tools in 0.624s with cached `npx --offline`; first `npx` startup was 70.628s on the recorded host |
 | Runtime POC | The repository CI/Compose workflow is configured to verify health, `403` prompt blocking, forwarding, metrics, and sanitized audit events |
 
 The real MCP evidence is documented in [WORKFLOW.md](WORKFLOW.md#661-real-world-verification-run).
@@ -279,7 +279,7 @@ $ .venv/bin/argus mcp-probe \
 [Argus] Decision: BLOCK
 [Argus] MCP transport: stdio; tools discovered: 14
 [Argus] Tool calls: 0 (read-only discovery)
-[Argus] Performance: 0.561s
+[Argus] Performance: 0.624s
 [Argus] Report written: /tmp/argus-real-demo/cli-official-mcp-release/report.json
 [Argus] Report written: /tmp/argus-real-demo/cli-official-mcp-release/report.md
 [Argus] Report written: /tmp/argus-real-demo/cli-official-mcp-release/report.sarif
@@ -295,7 +295,7 @@ Findings: 2
 HIGH ARGUS_ST_002 — Missing input sanitization schema
 HIGH ARGUS_ST_017 — High-impact MCP tool without approval
 MCP live probe — 14 tools, 1 page, 0 tool calls
-Server — secure-filesystem-server 0.2.0
+Server — secure-filesystem-server 0.2.0 (Argus 0.2.1)
 ```
 
 The finding evidence is actionable: add stronger input constraints to

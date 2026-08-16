@@ -30,15 +30,15 @@ proposal is blocked and prints `side_effects: 0`.
 ## Recorded run
 
 Recorded on 2026-08-16 from source commit
-`8798c81b70044222176dd07223a50be0f2dd5a49`, using Argus `0.2.0`, Python
+`85a5ab032751d00c9f451082e5bbd5ca019ae17c`, using Argus `0.2.1`, Python
 `3.14.4`, Node.js `v24.15.0`, and npm `11.16.0`.
 The elapsed values below are the Argus internal scan timing; shell startup time
 is shown separately only to make the result reproducible on this machine.
 
 | Command | Files | Findings | Decision | Exit | Argus elapsed | Wall elapsed |
 |---|---:|---:|---|---:|---:|---:|
-| safe fixture | 2 | 0 | PASS | 0 | 0.016s | host-dependent |
-| vulnerable fixture | 5 | 22 (10 critical, 9 high) | BLOCK | 10 | 0.017s | host-dependent |
+| safe fixture | 2 | 0 | PASS | 0 | 0.023s | host-dependent |
+| vulnerable fixture | 5 | 22 (10 critical, 9 high) | BLOCK | 10 | 0.027s | host-dependent |
 | isolated indirect proof | — | — | BLOCK at tool boundary | 0 | — | 0.70s |
 
 The benchmark was run without an LLM credential or external endpoint. It
