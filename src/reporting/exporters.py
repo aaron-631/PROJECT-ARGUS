@@ -89,6 +89,9 @@ class MarkdownExporter(BaseExporter):
         report = build_report(results)
         destination = Path(output_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
+        overall_decision = report.summary.get(
+            "overall_decision", report.summary.get("decision", "UNKNOWN")
+        )
         lines = [
             "# Argus Security Evaluation Report",
             "",
@@ -96,7 +99,7 @@ class MarkdownExporter(BaseExporter):
             f"- Profile: `{report.metadata.profile}`",
             f"- Scan ID: `{report.metadata.scan_id}`",
             f"- Evaluation methodology: `{report.evaluation_methodology}`",
-            f"- Overall findings: **{report.summary.get('overall_decision', report.summary.get('decision', 'UNKNOWN'))}** "
+            f"- Overall findings: **{overall_decision}** "
             f"(fail on `{report.summary.get('fail_on', 'HIGH')}`)",
             "",
             "## Summary",

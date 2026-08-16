@@ -90,7 +90,7 @@ jobs:
       - name: Run Scan
         run: .venv/bin/argus scan --target . --output ./reports
       - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: reports/report.sarif

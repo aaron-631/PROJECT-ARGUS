@@ -256,7 +256,7 @@ Scanning on pushes and same-repository pull requests. If you add the step to a
 different workflow, use the same path:
 
 ```yaml
-- uses: github/codeql-action/upload-sarif@v3
+- uses: github/codeql-action/upload-sarif@v4
   if: always()
   with:
     sarif_file: reports/ci/report.sarif
