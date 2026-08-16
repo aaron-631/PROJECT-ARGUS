@@ -76,6 +76,8 @@ servers, tool schemas, permissions, egress, TLS, unpinned packages, skills,
 and explicit RAG trust-boundary/output-validation settings. Its dynamic modules
 also include indirect prompt-injection probes that carry retrieved context and
 detect dangerous tool proposals.
+Claude-style `permissions.allow` entries are interpreted too: bounded commands
+can pass, while wildcard high-impact shell grants are reported.
 
 **Language scope.** Configuration rules (JSON/YAML/TOML) and text/secret rules
 are language-agnostic. Code-execution rules (`ARGUS_ST_003`, `ARGUS_ST_007`) use
@@ -228,10 +230,11 @@ acceptance procedure is in [POC.md](POC.md).
 | Installable CLI | Editable package install succeeded; `argus` and `argus-runtime` help commands work |
 | Automated quality gate | Full pytest, Black, Flake8, mypy, and schema checks run in CI |
 | SARIF export | GitHub-compatible `report.sarif` with stable rule IDs, locations, severity, and fingerprints |
-| Current deployment smoke | Claude global settings `BLOCK` on 1 CRITICAL credential finding; Claude local/Codex/Gemini configs `PASS`; empty Gemini MCP registry `ERROR` |
+| Current deployment smoke | Claude global/local settings `BLOCK`; Antigravity, Codex, and Gemini general config pass; empty Gemini MCP registry `ERROR` |
 | Real MCP server | Official pinned filesystem server: 14 tools, 1 page, 0 tool calls, 2 HIGH findings, `BLOCK` |
 | Baseline gate | Existing findings remain visible while new or escalated risk returns exit code `10` |
 | Evidence bundle | [Sanitized recorded MCP result](evidence/real-mcp/README.md) with provenance and hashes |
+| Real local CLI verification | [Codex, Claude Code, Gemini CLI, and Antigravity settings](evidence/real-cli/README.md) with static and bounded live results |
 | Compatibility and supply chain | Cross-platform CI matrix, dependency audit/SBOM, and Docker image advisory scan |
 | Performance smoke run | Safe benchmark: 2 files in 0.016s; real MCP discovery: 14 tools in 1.016s warm; cold `npx` startup is host-dependent |
 | Runtime POC | The repository CI/Compose workflow is configured to verify health, `403` prompt blocking, forwarding, metrics, and sanitized audit events |

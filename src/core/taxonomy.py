@@ -173,7 +173,7 @@ RULE_TAXONOMY: dict[str, TaxonomyEntry] = {
     ),
     "ARGUS_ST_016": _entry(
         "ARGUS_ST_016",
-        "Wildcard or administrative MCP permission",
+        "Wildcard or administrative agent permission",
         owasp=("LLM06", "ASI02", "ASI03"),
         atlas=("AML.T0052",),
         cwe=("CWE-250",),

@@ -126,8 +126,8 @@ _RULES: dict[str, tuple[Severity, str, str, float, str]] = {
     ),
     "ARGUS_ST_016": (
         Severity.CRITICAL,
-        "Wildcard or administrative MCP permission",
-        "An MCP server or tool grants a wildcard, all-resource, root, admin, or sudo-style permission.",  # noqa: E501
+        "Wildcard or administrative agent permission",
+        "An agent policy grants a wildcard, all-resource, root, admin, sudo-style, or unbounded native command permission.",  # noqa: E501
         9.0,
         "Replace broad permissions with the smallest named files, resources, commands, and scopes required.",  # noqa: E501
     ),
@@ -442,6 +442,70 @@ def _destructive_operation(value: dict[str, Any]) -> str | None:
             match = _DESTRUCTIVE_RE.search(candidate)
             if match:
                 return match.group(0).lower()
+    return None
+
+
+_NATIVE_PERMISSION_KEYS = {"allow", "allowed", "allowed_tools", "allowedtools"}
+_NATIVE_PERMISSION_PARENTS = {"permission", "permissions", "policy", "policies"}
+_NATIVE_RISKY_COMMANDS = {
+    "bash",
+    "curl",
+    "dd",
+    "docker",
+    "eval",
+    "kill",
+    "mkfs",
+    "nc",
+    "node",
+    "npm",
+    "npx",
+    "pip",
+    "pip3",
+    "pkill",
+    "podman",
+    "python",
+    "python3",
+    "rm",
+    "rmdir",
+    "scp",
+    "sh",
+    "sudo",
+    "umount",
+    "wget",
+    "xargs",
+}
+_NATIVE_PERMISSION_RE = re.compile(r"(?i)^bash\((?P<body>.*)\)$")
+
+
+def _native_permission_issue(location: str, value: Any) -> tuple[str, str] | None:
+    """Identify broad native CLI grants without treating every allow entry as unsafe.
+
+    Claude Code and similar clients express permissions as strings such as
+    ``Bash(curl:*)``. The generic structured checks can see the list but cannot
+    tell whether the string grants an unbounded shell operation. Only policy
+    allow-lists under a permission/policy object are considered, and bounded
+    commands such as ``Bash(git status)`` are intentionally ignored.
+    """
+
+    if not isinstance(value, str):
+        return None
+    tokens = [token for token in re.split(r"[.\[\]]+", location.lower().replace("-", "_")) if token]
+    if not any(token in _NATIVE_PERMISSION_PARENTS for token in tokens):
+        return None
+    if not any(token in _NATIVE_PERMISSION_KEYS for token in tokens):
+        return None
+    match = _NATIVE_PERMISSION_RE.fullmatch(value.strip())
+    if match is None:
+        return None
+    body = match.group("body").strip()
+    if body == "*":
+        return "wildcard shell permission", "*"
+    command = re.split(r"[:;|&<>*\s]+", body, maxsplit=1)[0].strip().lower()
+    command = Path(command).name
+    if command in _NATIVE_RISKY_COMMANDS and (
+        "*" in body or any(operator in body for operator in ("&&", "||", ";", "|", ">", "<"))
+    ):
+        return "unbounded high-impact shell permission", command
     return None
 
 
@@ -801,6 +865,7 @@ class MCPScanner(BaseStaticScanner):
 
         # Schema-aware rules operate on parsed JSON/YAML documents.
         dependency_graph: dict[str, set[str]] = defaultdict(set)
+        native_permission_findings: set[tuple[str, str]] = set()
         for path, document, raw, parsed_document in parsed:
             values = list(_iter_values(document))
             for location, value in values:
@@ -900,6 +965,24 @@ class MCPScanner(BaseStaticScanner):
                         {"key_path": location, "framework": key_name, "version": value},
                         parsed_document.line_for(key_name),
                     )
+                native_permission_issue = _native_permission_issue(location, value)
+                if native_permission_issue and self._supports(
+                    "ARGUS_ST_016", path, parsed_document
+                ):
+                    reason, command_family = native_permission_issue
+                    deduplication_key = (path, command_family)
+                    if deduplication_key not in native_permission_findings:
+                        native_permission_findings.add(deduplication_key)
+                        add(
+                            "ARGUS_ST_016",
+                            path,
+                            {
+                                "key_path": location.rsplit("[", 1)[0],
+                                "permission_family": command_family,
+                                "match": reason,
+                            },
+                            parsed_document.line_for("allow"),
+                        )
                 if isinstance(value, dict):
                     name = str(value.get("name", location))
                     description = str(value.get("description", ""))
@@ -1248,9 +1331,15 @@ class MCPScanner(BaseStaticScanner):
             key=lambda item: (item.rule_id, item.source_file or "", item.line or 0, item.title)
         )
         unique: list[Finding] = []
-        seen: set[tuple[str, str | None, int | None]] = set()
+        seen: set[tuple[str, str | None, int | None, str | None]] = set()
         for finding in findings:
-            key = (finding.rule_id, finding.source_file, finding.line)
+            permission_family = (
+                str(finding.evidence.get("permission_family"))
+                if finding.rule_id == "ARGUS_ST_016"
+                and finding.evidence.get("permission_family") is not None
+                else None
+            )
+            key = (finding.rule_id, finding.source_file, finding.line, permission_family)
             if key not in seen:
                 seen.add(key)
                 unique.append(finding)

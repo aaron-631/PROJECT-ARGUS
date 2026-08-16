@@ -159,6 +159,7 @@ class MarkdownExporter(BaseExporter):
         if not report.findings:
             lines.append("No static findings were produced.")
         for finding in report.findings:
+            permission_family = finding.evidence.get("permission_family")
             lines.extend(
                 [
                     f"### {finding.severity.value}: {finding.title} (`{finding.rule_id}`)",
@@ -171,6 +172,7 @@ class MarkdownExporter(BaseExporter):
                     f"- OWASP: `{', '.join(finding.owasp_ids) or 'unmapped'}`; ATLAS: "
                     f"`{', '.join(finding.atlas_ids) or 'unmapped'}`; CWE: "
                     f"`{', '.join(finding.cwe_ids) or 'not assigned'}`",
+                    (f"- Permission family: `{permission_family}`" if permission_family else ""),
                     "",
                     f"**Remediation:** {finding.remediation or 'Review the evidence and apply a least-privilege control.'}",  # noqa: E501
                     "",
