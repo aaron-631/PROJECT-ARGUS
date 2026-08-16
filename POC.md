@@ -28,7 +28,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.lock
 .venv/bin/pip install -e .
 .venv/bin/argus doctor
-mkdir -p reports/poc poc-mcp-root
+mkdir -p reports/poc poc-mcp-root runtime-audit
 ```
 
 For the shortest safe rehearsal, run `python scripts/demo.py` instead. It
@@ -177,12 +177,15 @@ curl --fail --silent \
   http://127.0.0.1:8080/v1/messages
 
 curl --fail --silent http://127.0.0.1:8080/metrics | grep argus_runtime_requests_total
+docker compose cp runtime:/app/runtime-audit/events.jsonl ./runtime-audit/events.jsonl
 test -s runtime-audit/events.jsonl
 docker compose down
 ```
 
 This demonstrates request policy, upstream forwarding, metrics, and sanitized
-hash-chained audit events. It is not a production public-internet deployment;
+hash-chained audit events. The Compose demo stores audit data in a named volume
+because the container runs as a non-root user; `docker compose cp` exports the
+event file for inspection. It is not a production public-internet deployment;
 TLS, identity, external approvals, durable audit shipping, and replica
 coordination are configured in the production Compose baseline and must be
 connected to real enterprise services.

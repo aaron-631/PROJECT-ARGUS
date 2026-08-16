@@ -240,7 +240,7 @@
       "additionalProperties": false,
       "properties": {
         "argus_version": {
-          "default": "1.0.0",
+          "default": "0.2.0",
           "title": "Argus Version",
           "type": "string"
         },

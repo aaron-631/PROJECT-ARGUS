@@ -10,6 +10,7 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
+from src.core.evaluation import normalize_for_evaluation
 from src.core.sanitization import sanitize
 
 from .models import PolicyDecision, RuntimePolicyConfig
@@ -33,10 +34,14 @@ def _content_text(message: Any) -> str:
     if isinstance(message, str):
         return message
     if isinstance(message, dict):
-        content = message.get("content", "")
-        if isinstance(content, str):
-            return content
-        return " ".join(_strings(content))
+        for key in ("content", "text", "input_text", "output_text"):
+            if key not in message:
+                continue
+            content = message[key]
+            if isinstance(content, str):
+                return content
+            return " ".join(_strings(content))
+        return ""
     return ""
 
 
@@ -47,6 +52,13 @@ def _prompt_texts(body: dict[str, Any]) -> list[str]:
             _content_text(message)
             for message in messages
             if isinstance(message, dict) and message.get("role") != "tool"
+        ]
+    input_value = body.get("input")
+    if isinstance(input_value, list):
+        return [
+            _content_text(item)
+            for item in input_value
+            if not (isinstance(item, dict) and item.get("role") == "tool")
         ]
     for key in ("prompt", "input"):
         if isinstance(body.get(key), str):
@@ -68,7 +80,7 @@ def _tool_name(value: Any) -> str | None:
 
 def _tool_calls(body: dict[str, Any]) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
-    tool_keys = {"tool_call", "tool_calls", "tool_use", "tool_uses"}
+    tool_keys = {"tool_call", "tool_calls", "tool_use", "tool_uses", "function_call"}
 
     def visit(value: Any, key: str = "") -> None:
         if isinstance(value, dict):
@@ -196,7 +208,7 @@ class RuntimePolicy:
         if not isinstance(body, dict):
             return PolicyDecision(decision="block", reason_codes=["INVALID_REQUEST_OBJECT"])
 
-        prompt_text = " ".join(_prompt_texts(body))
+        prompt_text = normalize_for_evaluation(" ".join(_prompt_texts(body)))
         if any(pattern.search(prompt_text) for pattern in self._prompt_patterns):
             return PolicyDecision(decision="block", reason_codes=["PROMPT_INJECTION_BLOCKED"])
 
@@ -244,6 +256,25 @@ class RuntimePolicy:
                     metadata={"approval_tools": approval_required},
                 )
 
+        if self.config.deny_unknown_tools:
+            allowed_tools = [pattern.lower() for pattern in self.config.allowed_tools]
+            unknown_tools = [
+                name
+                for name in names
+                if not any(
+                    fnmatch.fnmatchcase(name.lower(), pattern.lower())
+                    for pattern in self.config.approval_tools
+                )
+                and not any(fnmatch.fnmatchcase(name.lower(), pattern) for pattern in allowed_tools)
+            ]
+            if unknown_tools:
+                return PolicyDecision(
+                    decision="block",
+                    reason_codes=["UNKNOWN_TOOL_BLOCKED"],
+                    tool_names=names,
+                    metadata={"unknown_tools": unknown_tools},
+                )
+
         allowed_domains = {
             domain.lower().lstrip("@").strip() for domain in self.config.allowed_email_domains
         }
@@ -274,7 +305,8 @@ class RuntimePolicy:
             if tool_decision.decision != "allow":
                 return tool_decision, None
         raw_text = " ".join(_strings(body))
-        if any(pattern.search(raw_text) for pattern in self._output_patterns):
+        normalized_text = normalize_for_evaluation(raw_text)
+        if any(pattern.search(normalized_text) for pattern in self._output_patterns):
             return PolicyDecision(decision="block", reason_codes=["SENSITIVE_OUTPUT_BLOCKED"]), None
         redacted, count = _redact_value(body, self.config.redact_personal_data)
         if count:

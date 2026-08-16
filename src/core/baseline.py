@@ -158,6 +158,8 @@ def apply_baseline(results: dict[str, Any], path: str | Path) -> dict[str, Any]:
     current = {**results, "_baseline_path": str(path)}
     comparison = compare_results(current, baseline)
     results.setdefault("summary", {})["baseline"] = comparison
+    results["summary"]["gate_decision"] = comparison["gate"]
+    results["summary"].setdefault("overall_decision", results["summary"].get("decision", "UNKNOWN"))
     return results
 
 

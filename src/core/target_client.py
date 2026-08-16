@@ -307,6 +307,13 @@ def _extract_tool_calls(raw: str) -> list[dict[str, str]]:
                 for item in content[:16]
                 if isinstance(item, dict) and item.get("type") == "tool_use"
             )
+        output = data.get("output")
+        if isinstance(output, list):
+            candidates.extend(
+                item
+                for item in output[:32]
+                if isinstance(item, dict) and item.get("type") == "function_call"
+            )
         candidates.extend(data.get("tool_calls", []) or [])
         single = data.get("tool_call")
         if single is not None:

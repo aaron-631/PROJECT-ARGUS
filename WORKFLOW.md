@@ -299,6 +299,11 @@ The current findings remain visible. The baseline gate passes only when there
 are no new findings, severity increases, or newly unsafe dynamic probes. It
 records resolved findings as progress. Exit code `0` means no regression,
 `10` means a new or escalated finding, and `1` means the scan did not complete.
+The JSON and Markdown reports keep the original scan decision in
+`summary.overall_decision` and record the baseline result separately as
+`summary.gate_decision` (also under `summary.baseline.gate`). The terminal
+output prints both, so an accepted existing backlog cannot look like a clean
+overall scan.
 
 Every default scan also writes `report.sarif`. It maps Argus rule IDs to SARIF
 results with GitHub-compatible severity, relative file locations, remediation,
@@ -699,7 +704,7 @@ were intentionally excluded from the scan targets and evidence:
 | Gemini CLI 0.49.0 | `$HOME/.gemini/config/config.json` | PASS; 0 findings |
 | Gemini MCP registry | `$HOME/.gemini/config/mcp_config.json` | ERROR; file is empty, so Argus correctly refused to call it safe |
 | OpenClaw | `$HOME/.openclaw` | Not installed in this environment; no result claimed |
-| Official MCP server 2026.7.10 | Installed `argus mcp-probe` launched `@modelcontextprotocol/server-filesystem` over stdio with one temporary directory as its only allowed root | 14 tools, 1 page, 0 tool calls; 1.016s warm; Argus returned BLOCK for 2 HIGH findings |
+| Official MCP server 2026.7.10 | Installed `argus mcp-probe` launched `@modelcontextprotocol/server-filesystem` over stdio with one temporary directory as its only allowed root | 14 tools, 1 page, 0 tool calls; 0.640s with cached `npx --offline`; Argus returned BLOCK for 2 HIGH findings |
 
 The reproducible static commands were:
 
@@ -712,16 +717,17 @@ The reproducible static commands were:
 ```
 
 The CLI configuration reports were written to `/tmp/argus-installed-*` during
-the earlier verification run, and the refreshed feature-branch MCP report is in
-`/tmp/argus-real-demo/cli-official-mcp-branch`. Retain the generated `report.json`,
+the earlier verification run, and the refreshed MCP report is in
+`/tmp/argus-remediation-real-mcp-offline`. Retain the generated `report.json`,
 `report.md`, and `report.sarif` artifacts when repeating this on another
 machine. The empty
 Gemini MCP file demonstrates an important gate: malformed or incomplete
 configuration is `ERROR` with a non-zero exit code, never a false `PASS`.
 
 The cold MCP timing includes the first `npx` package startup/download and is
-host-dependent. The 1.016-second value is a warm run; keep the 120-second
-timeout for first-run installation or preinstall the pinned server package.
+host-dependent. The recorded first online run took 70.628 seconds; the cached
+`npx --offline` run took 0.640 seconds inside Argus. Keep the 120-second timeout
+for first-run installation or preinstall the pinned server package.
 
 The MCP runtime check used the official package at a fixed version, sent only
 the MCP `initialize` and paginated `tools/list` requests, and kept the
@@ -734,17 +740,14 @@ or any other side-effecting tool. The reproducible command was:
   --arg=@modelcontextprotocol/server-filesystem@2026.7.10 \
   --arg=/tmp/argus-real-mcp-root --timeout 120 \
   --server-name official-filesystem \
-  --confirm-live --output ./reports/real-mcp
+--confirm-live --output ./reports/real-mcp
 ```
 
 The MCP server was started with a fixed package version and an isolated
-temporary directory. Argus also scanned the downloaded package tree. That run
-found that a generic `package.json.repository.url` was being mistaken for an
-MCP endpoint. The rule was narrowed to actual `mcpServers`/`mcp.servers`
-configuration paths, a regression test was added, and the real package scan
-then passed with zero findings. This is exactly the kind of false-positive
-feedback a real integration run should produce before a security tool is used
-in CI.
+temporary directory. The current run found two actionable HIGH findings in the
+live tool definitions: missing input constraints on `read_file` and no approval
+checkpoint on `write_file`. This is the kind of evidence a real integration run
+should produce before a security tool is used in CI.
 
 The live MCP protocol check proves that a real stdio server can start and
 advertise tools, and the Argus report evaluates those live definitions. The
@@ -867,10 +870,11 @@ The gateway forwards allowed traffic to the configured upstream. It exposes:
 | --- | --- |
 | `POST /v1/messages` | Enforced model traffic |
 | `POST /v1/chat/completions` | OpenAI-compatible route alias using the same policies |
+| `POST /v1/responses` | OpenAI Responses-compatible route with `input` and `function_call` inspection |
 | `GET /healthz` | Liveness check |
 | `GET /metrics` | Prometheus-compatible counters |
 
-The gateway is wire-format agnostic at the HTTP boundary: it forwards the original JSON body and a configurable safe header allowlist to the upstream. The default includes `Authorization`, `x-api-key`, `api-key`, Anthropic version headers, and OpenAI organization/project headers. The Argus approval header, `Host`, `Content-Length`, and other hop-by-hop headers are never forwarded. The policy extractor understands common OpenAI-style `tool_calls`, generic `tool_call`, and Anthropic-style `tool_use`/content blocks. It does not translate provider-specific schemas or invent missing fields.
+The gateway forwards the original JSON body and a configurable safe header allowlist to the upstream. It normalizes prompt text with NFKC, invisible-control separation, and common confusable handling before applying prompt policies. The default includes `Authorization`, `x-api-key`, `api-key`, Anthropic version headers, and OpenAI organization/project headers. The Argus approval header, `Host`, `Content-Length`, and other hop-by-hop headers are never forwarded. The policy extractor understands OpenAI `tool_calls`, OpenAI Responses `function_call`, generic `tool_call`, and Anthropic `tool_use` content blocks. Unknown tool schemas are not silently allowed; configure an adapter or reject them before production.
 
 ### Request policies
 
@@ -893,7 +897,7 @@ curl -i http://127.0.0.1:8080/v1/messages \
 }
 ```
 
-Dangerous tool calls such as `delete_student_record` match `delete*` and are blocked. Business-impacting tools such as `update_student_record`, `send_external_email`, and `issue_offer` return HTTP `428` until a human approval token is supplied. The same checks run on model-proposed `tool_calls` in the upstream response, before the agent receives a tool call it could execute.
+Dangerous tool calls such as `delete_student_record` match `delete*` and are blocked. Business-impacting tools such as `update_student_record`, `send_external_email`, and `issue_offer` return HTTP `428` until a human approval token is supplied. Other tools are blocked by default unless their names match `policy.allowed_tools`. The same checks run on model-proposed tool calls in the upstream response, before the agent receives a tool call it could execute.
 
 For a local demonstration only:
 
@@ -931,7 +935,7 @@ review → stop and require an approved retry
 
 ### Audit and monitoring
 
-Each request writes a sanitized JSONL event to `runtime-audit/events.jsonl` by default. It records request ID, decision, reason codes, tool names, status, latency, upstream status, and redaction count—not the prompt or model response. Events contain a previous-hash and event-hash chain; set `ARGUS_RUNTIME_AUDIT_KEY` to add an HMAC for stronger authenticity.
+Each request writes a sanitized JSONL event to `runtime-audit/events.jsonl` by default. It records request ID, decision, reason codes, tool names, status, latency, upstream status, and redaction count—not the prompt or model response. Events contain a previous-hash and event-hash chain; set `ARGUS_RUNTIME_AUDIT_KEY` to add an HMAC for stronger authenticity. On startup, an existing chain is verified before append; a corrupt or HMAC-protected chain without its key fails closed instead of silently restarting at `GENESIS`. Writes flush and `fsync` the event before the request is considered audited.
 
 Inspect live counters:
 
@@ -1138,6 +1142,8 @@ engine:
   max_retries: 3
   backoff_base_seconds: 0.25
   max_file_size_bytes: 1048576
+  max_files: 5000
+  max_total_size_bytes: 100000000
 judge:
   backend: NullJudgeBackend
 reporting:
@@ -1159,6 +1165,8 @@ Important configuration knobs:
 | `engine.rate_limit_rps` | Token-bucket request rate | Match the target's approved rate limit |
 | `engine.timeout_seconds` | Per-request timeout | Increase only for intentionally slow models |
 | `engine.max_retries` | Retry count for transient failures | Keep bounded so a broken endpoint cannot hang CI |
+| `engine.max_files` | Maximum candidate files in one source target | Lower it when scanning untrusted or resource-constrained inputs |
+| `engine.max_total_size_bytes` | Aggregate candidate-file byte limit | Keep it below the scan worker's memory/disk budget |
 | `reporting.formats` | `json`, `markdown`, `sarif`, or any combination | Keep JSON/Markdown for review and SARIF for Code Scanning |
 | `reporting.fail_on` | Default CI severity gate | Use `HIGH` for a strict deployment gate |
 | `judge.backend` | Null, mock, or HTTP judge selection | Keep `NullJudgeBackend` for deterministic private scans |
@@ -1186,6 +1194,8 @@ Local ingestion:
 - checks that symlinks do not escape the scan root;
 - rejects files larger than `max_file_size_bytes`, aborting the scan rather
   than dropping the file;
+- enforces `max_files` and `max_total_size_bytes` before reading candidate
+  content, so a repository cannot grow memory use without bound;
 - skips known binary extensions, NUL bytes, and non-UTF-8 content, recording
   each skipped path in `summary.skipped_files`;
 - skips Argus's own generated reports, also recording them in
@@ -1200,6 +1210,11 @@ unscanned file be reported as a clean pass; that case raises instead. When the
 scan target is a single file that cannot be read, that also raises rather than
 returning an empty `PASS`, since a clean report over zero files is
 indistinguishable from a clean report over real ones.
+
+Git targets use a shallow, filtered, no-checkout clone, inspect the Git tree's
+file count and blob sizes before checkout, and abort when the same limits would
+be exceeded. If the remote cannot provide the filtered tree metadata, scan a
+local checkout instead of silently downloading an unbounded repository.
 
 Skipping previous reports is a correctness fix, not an optimization. A report
 quotes the evidence it found, so ingesting one re-reports that evidence as
@@ -1610,11 +1625,11 @@ For every decision, say both halves. For example: “We chose a local null judge
 
 The Dockerfile:
 
-1. starts from `python:3.11-slim`;
+1. starts from an immutable digest of the official `python:3.11-slim` image;
 2. installs the reproducible `requirements.lock`;
 3. copies the repository into `/app`;
-4. creates `.vault` and `reports` directories;
-5. uses `python argus.py` as the image entrypoint.
+4. creates writable application directories owned by UID/GID `10001`;
+5. runs as the non-root `argus` user and uses `python argus.py` as the image entrypoint.
 
 The Compose file has three services:
 
@@ -1632,9 +1647,14 @@ The important Compose decisions are:
 - a TCP health check prevents Argus from starting before the endpoint is listening;
 - `ARGUS_TARGET_ENDPOINT=http://mock:8765/v1/messages` enables dynamic testing inside the Compose network;
 - `runtime` exposes port `8080` and forwards to the mock through the Compose network;
-- runtime audit events are mounted at `./runtime-audit` and contain no raw prompts or responses;
+- demo containers run as a non-root user with read-only root filesystems, dropped
+  Linux capabilities, no-new-privileges, bounded PIDs/memory/CPU, and named
+  writable volumes;
+- runtime audit events contain no raw prompts or responses; use `docker compose cp`
+  to export the named-volume event file for local inspection;
 - the demo uses `--fail-on CRITICAL` because its mock intentionally demonstrates a high-risk prompt-injection success;
-- `./config` is read-only, while `./reports` and `./.vault` are writable mounts.
+- `./config` is read-only; reports, vault data, and runtime audit data use
+  container-managed volumes so the non-root image can write them safely.
 
 Run it:
 
@@ -1663,6 +1683,7 @@ docker compose down
 9. start the local mock and run an integration scan;
 10. upload the generated SARIF report as a CI artifact;
 11. build the Docker image;
+12. fail the job when the built image contains fixed HIGH or CRITICAL Trivy findings.
 12. validate both the repository demo Compose file and the reusable runtime Compose file;
 13. start `mock` and the runtime gateway, then test health, request blocking, forwarding, and metrics;
 14. start the full Compose deployment and require the Argus service to exit successfully.
@@ -1993,7 +2014,7 @@ Say these limits confidently in an interview. A clear boundary is evidence of en
 
 ## 18. How to extend the project
 
-The extension interfaces are intentionally small. The registry validates inheritance, IDs, versions, and duplicate registrations. Built-in modules are registered explicitly; third-party packages are discovered through the `argus.scanners`, `argus.attacks`, `argus.judges`, and `argus.exporters` entry-point groups, so extending Argus does not require forking it. A plugin that fails to import is skipped rather than aborting the scan. See `docs/plugins.md`.
+The extension interfaces are intentionally small. The registry validates inheritance, IDs, versions, and duplicate registrations. Built-in modules are registered explicitly; third-party packages are discovered through the `argus.scanners`, `argus.attacks`, `argus.judges`, and `argus.exporters` entry-point groups, so extending Argus does not require forking it. A plugin that fails to import is skipped from execution, recorded in the report errors, and forces an `ERROR` result rather than producing a falsely clean scan. See `docs/plugins.md`.
 
 ### 18.1 Add a static scanner
 

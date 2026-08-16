@@ -26,6 +26,8 @@ class SkippableFileError(IngressError):
 
 
 DEFAULT_MAX_FILE_SIZE = 1_048_576
+DEFAULT_MAX_FILES = 5_000
+DEFAULT_MAX_TOTAL_SIZE = 100_000_000
 _IGNORED_DIRS = {
     ".git",
     ".hg",
@@ -192,12 +194,45 @@ def _read_record(root: Path, file_path: Path, max_file_size: int) -> FileRecord:
     )
 
 
+def _account_file(
+    file_path: Path,
+    *,
+    files_seen: int,
+    total_size: int,
+    max_file_size: int,
+    max_files: int,
+    max_total_size: int,
+) -> tuple[int, int]:
+    """Check aggregate ingress limits before reading another candidate file."""
+
+    try:
+        size = file_path.stat().st_size
+    except OSError as exc:
+        raise IngressError(f"unable to stat file: {file_path}") from exc
+    if size > max_file_size:
+        raise IngressError(f"file exceeds {max_file_size} bytes: {file_path}")
+    if files_seen >= max_files:
+        raise IngressError(f"scan contains more than {max_files} files")
+    if total_size + size > max_total_size:
+        raise IngressError(f"scan exceeds {max_total_size} total file bytes")
+    return files_seen + 1, total_size + size
+
+
+def _validate_ingress_limits(max_file_size: int, max_files: int, max_total_size: int) -> None:
+    if max_file_size < 1024 or max_files < 1 or max_total_size < 1024:
+        raise IngressError("invalid ingress limits")
+
+
 def ingest_local(
     path: str,
     max_file_size: int = DEFAULT_MAX_FILE_SIZE,
     exclude: tuple[str, ...] = (),
+    max_files: int = DEFAULT_MAX_FILES,
+    max_total_size: int = DEFAULT_MAX_TOTAL_SIZE,
 ) -> ScanContext:
-    """Read a directory (or one text file) without following unsafe links."""
+    """Read a bounded directory (or one text file) without unsafe links."""
+
+    _validate_ingress_limits(max_file_size, max_files, max_total_size)
 
     candidate = Path(path)
     if not candidate.exists() or candidate.is_symlink():
@@ -205,7 +240,17 @@ def ingest_local(
     root = candidate.resolve()
     files: dict[str, FileRecord] = {}
     skipped: list[str] = []
+    files_seen = 0
+    total_size = 0
     if root.is_file():
+        files_seen, total_size = _account_file(
+            root,
+            files_seen=files_seen,
+            total_size=total_size,
+            max_file_size=max_file_size,
+            max_files=max_files,
+            max_total_size=max_total_size,
+        )
         try:
             record = _read_record(root.parent, root, max_file_size)
         except SkippableFileError as exc:
@@ -236,6 +281,14 @@ def ingest_local(
                 file_path = Path(current) / name
                 if _matches_exclude(file_path.relative_to(root).as_posix(), exclude):
                     continue
+                files_seen, total_size = _account_file(
+                    file_path,
+                    files_seen=files_seen,
+                    total_size=total_size,
+                    max_file_size=max_file_size,
+                    max_files=max_files,
+                    max_total_size=max_total_size,
+                )
                 try:
                     record = _read_record(root, file_path, max_file_size)
                     files[record.path] = record
@@ -265,15 +318,18 @@ def ingest_git(
     repo_url: str,
     max_file_size: int = DEFAULT_MAX_FILE_SIZE,
     exclude: tuple[str, ...] = (),
+    max_files: int = DEFAULT_MAX_FILES,
+    max_total_size: int = DEFAULT_MAX_TOTAL_SIZE,
 ) -> ScanContext:
     """Shallow-clone a repository with hooks disabled, then normalize its files."""
 
+    _validate_ingress_limits(max_file_size, max_files, max_total_size)
     if not _is_git_url(repo_url):
         raise IngressError("Git target must be an http(s), ssh, or git URL")
     temporary_root = Path(tempfile.mkdtemp(prefix="argus-git-"))
     clone_path = temporary_root / "repo"
     try:
-        subprocess.run(
+        clone = subprocess.run(
             [
                 "git",
                 "-c",
@@ -282,6 +338,8 @@ def ingest_git(
                 "--depth",
                 "1",
                 "--no-tags",
+                "--filter=blob:none",
+                "--no-checkout",
                 repo_url,
                 str(clone_path),
             ],
@@ -291,7 +349,60 @@ def ingest_git(
             text=True,
             timeout=300,
         )
-        context = ingest_local(str(clone_path), max_file_size=max_file_size, exclude=exclude)
+        clone_stderr = (clone.stderr or "").lower()
+        if "filtering not recognized" in clone_stderr or "filtering not supported" in clone_stderr:
+            raise IngressError(
+                "Git server does not support filtered clones; use a local checkout "
+                "to keep repository limits enforceable"
+            )
+        tree = subprocess.run(
+            ["git", "-C", str(clone_path), "ls-tree", "-r", "-l", "-z", "HEAD"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        ).stdout
+        files_seen = 0
+        total_size = 0
+        for entry in tree.split(b"\0"):
+            if not entry:
+                continue
+            header, separator, _path = entry.partition(b"\t")
+            if not separator:
+                raise IngressError("Git tree listing was malformed")
+            fields = header.decode("ascii", errors="strict").split()
+            if len(fields) < 4 or fields[1] != "blob":
+                continue
+            size = fields[3]
+            if size == "-":
+                raise IngressError("Git server did not provide bounded blob sizes")
+            try:
+                blob_size = int(size)
+            except ValueError as exc:
+                raise IngressError("Git tree contained an invalid blob size") from exc
+            if blob_size > max_file_size:
+                raise IngressError(f"Git repository contains a file over {max_file_size} bytes")
+            files_seen += 1
+            total_size += blob_size
+            if files_seen > max_files:
+                raise IngressError(f"Git repository contains more than {max_files} files")
+            if total_size > max_total_size:
+                raise IngressError(f"Git repository exceeds {max_total_size} total file bytes")
+        subprocess.run(
+            ["git", "-C", str(clone_path), "checkout", "--force", "HEAD", "--", "."],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=300,
+        )
+        context = ingest_local(
+            str(clone_path),
+            max_file_size=max_file_size,
+            exclude=exclude,
+            max_files=max_files,
+            max_total_size=max_total_size,
+        )
         commit = None
         try:
             commit = subprocess.run(
@@ -325,11 +436,13 @@ def ingest(
     target: str,
     max_file_size: int = DEFAULT_MAX_FILE_SIZE,
     exclude: tuple[str, ...] = (),
+    max_files: int = DEFAULT_MAX_FILES,
+    max_total_size: int = DEFAULT_MAX_TOTAL_SIZE,
 ) -> ScanContext:
     return (
-        ingest_git(target, max_file_size, exclude)
+        ingest_git(target, max_file_size, exclude, max_files, max_total_size)
         if _is_git_url(target)
-        else ingest_local(target, max_file_size, exclude)
+        else ingest_local(target, max_file_size, exclude, max_files, max_total_size)
     )
 
 

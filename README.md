@@ -200,10 +200,17 @@ cp .env.runtime.example .env.runtime
 docker compose --env-file .env.runtime -f docker-compose.runtime.yml up --build
 ```
 
-It can require client authentication, block prompt/tool policies, require
-approval, redact sensitive output, expose metrics, and write hash-chained audit
-events. It expects buffered JSON HTTP (`stream: false`) and is not, by itself,
-the complete public-internet TLS/identity boundary.
+It can require client authentication, normalize and block prompt-injection
+variants, enforce an explicit tool allow-list, require approval, redact
+sensitive output, expose metrics, and write hash-chained audit events. It
+supports `/v1/messages`, `/v1/chat/completions`, and `/v1/responses`, but still
+expects buffered JSON HTTP (`stream: false`) and is not, by itself, the complete
+public-internet TLS/identity boundary.
+
+Tool execution is deny-by-default. Configure reviewed read-only tools under
+`policy.allowed_tools`; write, communication, and other high-impact tools must
+be listed under `approval_tools` or `block_tools`. Unknown tool names are
+blocked before they reach the upstream model or agent.
 
 `redact_personal_data` currently covers email addresses and Indian mobile
 numbers; other national phone formats, postal addresses, and government IDs are
@@ -236,7 +243,7 @@ acceptance procedure is in [POC.md](POC.md).
 | Evidence bundle | [Sanitized recorded MCP result](evidence/real-mcp/README.md) with provenance and hashes |
 | Real local CLI verification | [Codex, Claude Code, Gemini CLI, and Antigravity settings](evidence/real-cli/README.md) with static and bounded live results |
 | Compatibility and supply chain | Cross-platform CI matrix, dependency audit/SBOM, and Docker image advisory scan |
-| Performance smoke run | Safe benchmark: 2 files in 0.016s; real MCP discovery: 14 tools in 1.016s warm; cold `npx` startup is host-dependent |
+| Performance smoke run | Safe benchmark: 2 files in 0.018s; real MCP discovery: 14 tools in 0.640s with cached `npx --offline`; first `npx` startup was 70.628s on the recorded host |
 | Runtime POC | The repository CI/Compose workflow is configured to verify health, `403` prompt blocking, forwarding, metrics, and sanitized audit events |
 
 The real MCP evidence is documented in [WORKFLOW.md](WORKFLOW.md#661-real-world-verification-run).
@@ -258,24 +265,24 @@ different workflow, use the same path:
 <details>
 <summary>Captured real Argus run — 2026-08-16</summary>
 
-Environment: Linux workspace, Python 3.14.4, Node.js v24.15.0, npm 11.16.0,
-source baseline commit `f1cae6a`, from the `feature/argus-taxonomy-indirect-injection`
-working tree.
+Environment: Linux/WSL2 workspace, Python 3.14.4, Node.js v24.15.0, npm 11.16.0.
+The source baseline commit is recorded in the linked evidence record after the
+remediation branch is merged to `main`.
 
 ```text
 $ .venv/bin/argus mcp-probe \
-    --transport stdio --command npx --arg=-y \
+    --transport stdio --command npx --arg=--offline --arg=-y \
     --arg=@modelcontextprotocol/server-filesystem@2026.7.10 \
     --arg=/tmp/argus-real-mcp-root --server-name official-filesystem \
-    --timeout 120 --confirm-live --output /tmp/argus-current-main-real-mcp
+    --timeout 120 --confirm-live --output /tmp/argus-remediation-real-mcp-offline
 
 [Argus] Decision: BLOCK
 [Argus] MCP transport: stdio; tools discovered: 14
 [Argus] Tool calls: 0 (read-only discovery)
-[Argus] Performance: 1.016s
-[Argus] Report written: /tmp/argus-current-main-real-mcp/report.json
-[Argus] Report written: /tmp/argus-current-main-real-mcp/report.md
-[Argus] Report written: /tmp/argus-current-main-real-mcp/report.sarif
+[Argus] Performance: 0.640s
+[Argus] Report written: /tmp/argus-remediation-real-mcp-offline/report.json
+[Argus] Report written: /tmp/argus-remediation-real-mcp-offline/report.md
+[Argus] Report written: /tmp/argus-remediation-real-mcp-offline/report.sarif
 shell_status:10
 ```
 
@@ -297,6 +304,10 @@ MCP inventory and deterministic report; it is not a claim that every tool
 implementation is safe.
 
 </details>
+
+The cached run used `npx --offline`; on the same host the first online `npx`
+startup took 70.628 seconds. New machines should omit `--offline` and retain
+the 120-second timeout for the first package download.
 
 This evidence does not claim a live commercial LLM test, live authenticated
 Streamable HTTP test, every operating system, or every MCP transport. Those

@@ -5,6 +5,26 @@ lightweight Keep a Changelog style; releases are versioned in `pyproject.toml`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-16
+
+### Security
+
+- Runtime prompt policies now normalize Unicode/control obfuscation and inspect
+  OpenAI Responses `input` messages.
+- Runtime tool enforcement is deny-by-default and recognizes OpenAI Responses
+  `function_call` output items.
+- Existing audit chains are verified before append and flushed to durable storage
+  with `fsync`.
+- Local and Git ingress enforce file-count and aggregate-byte limits before
+  reading repository content.
+
+### Delivery
+
+- Production and runtime Compose profiles use immutable base-image digests,
+  non-root containers, read-only filesystems, dropped capabilities, resource
+  limits, and no-new-privileges.
+- Baseline reports now distinguish overall findings from the CI gate decision.
+
 ### Fixed
 
 - Entry-point scanner plugins now actually run. `scanners` defaulted to

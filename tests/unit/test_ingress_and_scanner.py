@@ -39,6 +39,16 @@ def test_oversized_files_still_raise_rather_than_being_skipped(tmp_path: Path) -
         ingest_local(str(tmp_path), max_file_size=1024)
 
 
+def test_aggregate_ingress_limits_fail_closed(tmp_path: Path) -> None:
+    (tmp_path / "one.txt").write_text("a" * 600, encoding="utf-8")
+    (tmp_path / "two.txt").write_text("b" * 600, encoding="utf-8")
+
+    with pytest.raises(IngressError, match="more than 1 files"):
+        ingest_local(str(tmp_path), max_files=1)
+    with pytest.raises(IngressError, match="total file bytes"):
+        ingest_local(str(tmp_path), max_total_size=1024)
+
+
 def test_all_canonical_rules_can_be_exercised(tmp_path: Path) -> None:
     (tmp_path / "mcp.json").write_text(
         json.dumps(

@@ -43,6 +43,13 @@ To scan your own local project or repository:
 .venv/bin/argus scan --target /path/to/your/agent
 ```
 
+Large or untrusted repositories are bounded by default. Adjust the limits only
+when the target is trusted and the host has capacity:
+
+```bash
+.venv/bin/argus audit --target . --max-files 10000 --max-total-size-bytes 250000000
+```
+
 Skip vendored or generated trees with `--exclude` (repeatable):
 ```bash
 .venv/bin/argus scan --target . --exclude vendor --exclude '*.min.js'

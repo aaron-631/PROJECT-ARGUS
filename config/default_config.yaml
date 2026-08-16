@@ -9,6 +9,8 @@ engine:
   max_retries: 3
   backoff_base_seconds: 0.25
   max_file_size_bytes: 1048576
+  max_files: 5000
+  max_total_size_bytes: 100000000
 
 judge:
   backend: "NullJudgeBackend"  # Default: no external calls

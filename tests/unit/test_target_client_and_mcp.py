@@ -8,7 +8,7 @@ import aiohttp
 from src.core.config import load_config
 from src.core.engine import ArgusEngine
 from src.core.ingress import ingest_local
-from src.core.target_client import HTTPTargetClient, resolve_api_key
+from src.core.target_client import HTTPTargetClient, _extract_tool_calls, resolve_api_key
 from src.models.config import TargetConfig
 
 
@@ -118,6 +118,14 @@ def test_mcp_server_and_tool_permissions_are_reported(tmp_path: Path) -> None:
     assert result["summary"]["mcp_servers"][0]["name"] == "untrusted"
     assert result["summary"]["mcp_tools"][0]["name"] == "send_email"
     assert result["summary"]["mcp_tools"][0]["approval_required"] is False
+
+
+def test_openai_responses_function_call_is_extracted() -> None:
+    raw = json.dumps(
+        {"output": [{"type": "function_call", "name": "execute_command", "arguments": "{}"}]}
+    )
+
+    assert _extract_tool_calls(raw) == [{"name": "execute_command"}]
 
 
 def test_openclaw_style_skill_is_treated_as_untrusted_code(tmp_path: Path) -> None:

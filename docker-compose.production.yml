@@ -2,6 +2,14 @@ services:
   runtime:
     build: .
     restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: "1.0"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     expose:
       - "8080"
     entrypoint: ["python", "runtime_gateway.py"]
@@ -16,7 +24,7 @@ services:
       retries: 5
     volumes:
       - ./config/runtime:/app/config/runtime:ro
-      - ./runtime-audit:/app/runtime-audit
+      - runtime_audit:/app/runtime-audit
     environment:
       ARGUS_RUNTIME_UPSTREAM_URL: ${ARGUS_RUNTIME_UPSTREAM_URL:?Set ARGUS_RUNTIME_UPSTREAM_URL}
       ARGUS_RUNTIME_AUDIT_PATH: /app/runtime-audit/events-$${HOSTNAME}.jsonl
@@ -30,8 +38,17 @@ services:
       ARGUS_RUNTIME_AUDIT_SINK_TOKEN: ${ARGUS_RUNTIME_AUDIT_SINK_TOKEN:?Set ARGUS_RUNTIME_AUDIT_SINK_TOKEN}
 
   edge:
-    image: caddy:2.10-alpine
+    image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 256m
+    cpus: "0.5"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
     depends_on:
       runtime:
         condition: service_healthy
@@ -46,5 +63,6 @@ services:
       - caddy_config:/config
 
 volumes:
+  runtime_audit:
   caddy_data:
   caddy_config:

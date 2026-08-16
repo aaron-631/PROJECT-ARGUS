@@ -49,6 +49,14 @@ policy:
     - update_student_record
     - send_external_email
     - issue_offer
+  # Runtime tool execution is deny-by-default. Add only reviewed read-only
+  # tools for a real deployment; write/communication tools belong in approval_tools.
+  allowed_tools:
+    - search_student_records
+    - get_student_record
+    - list_placements
+    - get_placement_details
+  deny_unknown_tools: true
   allowed_email_domains:
     - university.edu
   block_output_patterns:

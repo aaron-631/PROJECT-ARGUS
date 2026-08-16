@@ -149,7 +149,9 @@ print(SARIFExporter().export(results, output_dir / "report.sarif"))
 ## Baseline comparison
 
 `apply_baseline` attaches a comparison under `summary["baseline"]` without
-changing the findings themselves, so only new or worsened findings gate a build:
+changing the findings themselves. `summary["overall_decision"]` remains the
+decision for all findings, while `summary["gate_decision"]` is the result of
+the baseline comparison, so only new or worsened findings gate a build:
 
 ```python
 from src.core.baseline import apply_baseline

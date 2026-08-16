@@ -42,6 +42,8 @@ def test_baseline_passes_when_only_existing_findings_remain(tmp_path: Path) -> N
 
     comparison = current["summary"]["baseline"]
     assert comparison["gate"] == "PASS"
+    assert current["summary"]["overall_decision"] == "BLOCK"
+    assert current["summary"]["gate_decision"] == "PASS"
     assert comparison["new_finding_count"] == 0
     assert comparison["unchanged_finding_count"] == 1
     assert _exit_for_results(current, "HIGH") == EXIT_OK

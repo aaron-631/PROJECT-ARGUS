@@ -103,6 +103,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     scan_parser.add_argument(
+        "--max-files",
+        type=int,
+        default=None,
+        help="Maximum candidate files to read (default: configured engine limit)",
+    )
+    scan_parser.add_argument(
+        "--max-total-size-bytes",
+        type=int,
+        default=None,
+        help="Maximum aggregate candidate-file bytes (default: configured engine limit)",
+    )
+    scan_parser.add_argument(
         "--json",
         action="store_true",
         dest="as_json",
@@ -315,6 +327,18 @@ def _apply_target_options(config, args: argparse.Namespace):
     return config.model_copy(update={"target": TargetConfig.model_validate(target)})
 
 
+def _apply_ingress_options(config, args: argparse.Namespace):
+    updates: dict[str, object] = {}
+    if getattr(args, "max_files", None) is not None:
+        updates["max_files"] = args.max_files
+    if getattr(args, "max_total_size_bytes", None) is not None:
+        updates["max_total_size_bytes"] = args.max_total_size_bytes
+    if not updates:
+        return config
+    engine = config.engine.model_copy(update=updates)
+    return config.model_copy(update={"engine": engine})
+
+
 def _print_summary(
     results: dict, written: list[Path], exit_code: int, endpoint: str | None
 ) -> None:
@@ -328,7 +352,12 @@ def _print_summary(
     decision = (
         "BLOCK" if exit_code == EXIT_FINDINGS else "ERROR" if exit_code == EXIT_ERROR else "PASS"
     )
-    print(f"[Argus] Decision: {decision}")
+    baseline = summary.get("baseline")
+    if isinstance(baseline, dict):
+        print(f"[Argus] Overall findings: {summary.get('overall_decision', decision)}")
+        print(f"[Argus] Gate decision: {baseline.get('gate', decision)}")
+    else:
+        print(f"[Argus] Decision: {decision}")
     print(
         "[Argus] Static findings: "
         f"{len(findings)} (critical={summary.get('critical_count', 0)}, "
@@ -343,7 +372,6 @@ def _print_summary(
         print("[Argus] Live probes: not run (no --endpoint or ARGUS_TARGET_ENDPOINT)")
     if errors:
         print(f"[Argus] Execution notes: {len(errors)}")
-    baseline = summary.get("baseline")
     if isinstance(baseline, dict):
         print(
             "[Argus] Baseline: "
@@ -370,6 +398,7 @@ def run_scan(args: argparse.Namespace) -> int:
     operation_started = perf_counter()
     config = load_config(profile=args.profile, config_path=args.config)
     config = _apply_target_options(config, args)
+    config = _apply_ingress_options(config, args)
     if args.formats:
         reporting = config.reporting.model_copy(update={"formats": args.formats})
         config = config.model_copy(update={"reporting": reporting})
@@ -388,6 +417,8 @@ def run_scan(args: argparse.Namespace) -> int:
         args.target,
         max_file_size=config.engine.max_file_size_bytes,
         exclude=tuple(getattr(args, "exclude", []) or ()),
+        max_files=config.engine.max_files,
+        max_total_size=config.engine.max_total_size_bytes,
     )
     ingest_seconds = perf_counter() - ingest_started
     context = context.model_copy(
@@ -552,7 +583,12 @@ def run_mcp_probe(args: argparse.Namespace) -> int:
         return EXIT_ERROR
     decision = results["summary"].get("decision", "UNKNOWN")
     exit_code = _exit_for_results(results, args.fail_on or config.reporting.fail_on)
-    print(f"[Argus] Decision: {'BLOCK' if exit_code == EXIT_FINDINGS else 'PASS'}")
+    baseline = results["summary"].get("baseline")
+    if isinstance(baseline, dict):
+        print(f"[Argus] Overall findings: {decision}")
+        print(f"[Argus] Gate decision: {baseline.get('gate', 'UNKNOWN')}")
+    else:
+        print(f"[Argus] Decision: {'BLOCK' if exit_code == EXIT_FINDINGS else 'PASS'}")
     print(
         f"[Argus] MCP transport: {args.transport}; tools discovered: "
         f"{results['summary'].get('mcp_probe', {}).get('tool_count', 0)}"

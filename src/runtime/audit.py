@@ -5,12 +5,17 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from src.core.sanitization import sanitize_value
+
+
+class AuditIntegrityError(RuntimeError):
+    """Raised when an existing audit chain cannot be trusted."""
 
 
 class AuditWriter:
@@ -23,12 +28,25 @@ class AuditWriter:
         self._previous_hash = self._read_previous_hash()
 
     def _read_previous_hash(self) -> str:
+        if not self.path.exists():
+            return "GENESIS"
+        if self.path.stat().st_size == 0:
+            return "GENESIS"
+        if not self.verify(self.path, self.hmac_key):
+            raise AuditIntegrityError(f"existing audit chain failed verification: {self.path}")
         try:
             last_line = self.path.read_text(encoding="utf-8").splitlines()[-1]
             value = json.loads(last_line)
-            return str(value.get("event_hash", "GENESIS"))
-        except (OSError, IndexError, UnicodeError, json.JSONDecodeError):
-            return "GENESIS"
+            event_hash = value.get("event_hash")
+            if not isinstance(event_hash, str) or not event_hash:
+                raise AuditIntegrityError(f"audit chain has no final event hash: {self.path}")
+            if value.get("event_hmac") and self.hmac_key is None:
+                raise AuditIntegrityError(
+                    "audit chain is HMAC-protected but no audit key was configured"
+                )
+            return event_hash
+        except (OSError, IndexError, UnicodeError, json.JSONDecodeError, AttributeError) as exc:
+            raise AuditIntegrityError(f"unable to read audit chain: {self.path}") from exc
 
     def write(self, event: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
@@ -55,6 +73,7 @@ class AuditWriter:
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(line)
                 handle.flush()
+                os.fsync(handle.fileno())
             self._previous_hash = event_hash
         return record
 
@@ -106,4 +125,4 @@ class AuditWriter:
         return True
 
 
-__all__ = ["AuditWriter"]
+__all__ = ["AuditIntegrityError", "AuditWriter"]

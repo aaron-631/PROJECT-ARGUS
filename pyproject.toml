@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "argus-framework"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first security evaluation and runtime policy gateway for AI agents, MCP servers, skills, and LLM deployments"
 readme = "README.md"
 license = {file = "LICENSE"}

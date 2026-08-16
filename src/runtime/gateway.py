@@ -477,6 +477,7 @@ def create_app(config: RuntimeConfig) -> web.Application:
     app["runtime_gateway"] = gateway
     app.router.add_post("/v1/messages", gateway.handle_messages)
     app.router.add_post("/v1/chat/completions", gateway.handle_messages)
+    app.router.add_post("/v1/responses", gateway.handle_messages)
     app.router.add_get("/healthz", gateway.handle_health)
     app.router.add_get("/metrics", gateway.handle_metrics)
 

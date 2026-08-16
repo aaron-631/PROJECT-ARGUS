@@ -23,6 +23,7 @@ import aiohttp
 from src.core.documents import parse_context
 from src.core.sanitization import sanitize, sanitize_value
 from src.models import FileRecord, ScanContext, SourceMetadata
+from src import __version__
 
 MCP_PROTOCOL_VERSION = "2025-06-18"
 _DEFAULT_MAX_RESPONSE_BYTES = 2_000_000
@@ -322,7 +323,7 @@ async def probe_stdio(
             {
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "argus", "version": "1.0.0"},
+                "clientInfo": {"name": "argus", "version": __version__},
             },
         )
         await session.notify("notifications/initialized")
@@ -533,7 +534,7 @@ async def probe_streamable_http(
             {
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "argus", "version": "1.0.0"},
+                "clientInfo": {"name": "argus", "version": __version__},
             },
         )
         await session.notify("notifications/initialized")

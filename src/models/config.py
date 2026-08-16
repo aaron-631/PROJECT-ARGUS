@@ -18,6 +18,8 @@ class EngineConfig(ConfigModel):
     max_retries: int = Field(default=3, ge=0, le=10)
     backoff_base_seconds: float = Field(default=0.25, ge=0.0, le=60.0)
     max_file_size_bytes: int = Field(default=1_048_576, ge=1024)
+    max_files: int = Field(default=5000, ge=1, le=1_000_000)
+    max_total_size_bytes: int = Field(default=100_000_000, ge=1024, le=10_000_000_000)
 
 
 class JudgeConfig(ConfigModel):

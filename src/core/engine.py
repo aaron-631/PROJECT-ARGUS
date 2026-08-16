@@ -16,6 +16,7 @@ from src.interfaces.judge import HTTPJudgeBackend, MockJudgeBackend, NullJudgeBa
 from src.models import SEVERITY_ORDER, AttackResult, Finding, ScanContext
 from src.models.config import ArgusConfig
 from src.modules.attacks.dataset import dataset_version
+from src import __version__
 
 
 class ArgusEngine:
@@ -317,7 +318,7 @@ class ArgusEngine:
         return {
             "metadata": {
                 "schema_version": "1.0",
-                "argus_version": "1.0.0",
+                "argus_version": __version__,
                 "source_type": context.source_type,
                 "source": context.source_path,
                 "profile": self.config.profile,
@@ -345,6 +346,8 @@ class ArgusEngine:
                 "suppressed_rules": list(self._suppressed_rules),
                 "fail_on": self.config.reporting.fail_on,
                 "decision": decision,
+                "overall_decision": decision,
+                "gate_decision": decision,
                 "compliance_coverage": compliance,
                 **inventory,
             },

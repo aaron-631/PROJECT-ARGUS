@@ -43,8 +43,8 @@ _CONFUSABLES = str.maketrans(
 def normalize_for_evaluation(raw_output: str) -> str:
     """Normalize hostile response text before deterministic signal matching.
 
-    NFKC handles compatibility forms; explicit removal handles zero-width and
-    bidi controls; a small confusable map catches common mixed-script bypasses.
+    NFKC handles compatibility forms; zero-width and bidi controls become
+    separators; a small confusable map catches common mixed-script bypasses.
     This is not a general Unicode security proof and intentionally avoids
     aggressive transliteration that would create false positives.
     """
@@ -55,8 +55,9 @@ def normalize_for_evaluation(raw_output: str) -> str:
 def _normalize_compatibility(raw_output: str) -> str:
     """Normalize representation without case-folding case-sensitive encodings."""
 
-    normalized = unicodedata.normalize("NFKC", sanitize(raw_output))
-    normalized = _ZERO_WIDTH_RE.sub("", normalized).translate(_CONFUSABLES)
+    separated = _ZERO_WIDTH_RE.sub(" ", raw_output)
+    normalized = unicodedata.normalize("NFKC", sanitize(separated))
+    normalized = normalized.translate(_CONFUSABLES)
     return re.sub(r"\s+", " ", normalized).strip()
 
 

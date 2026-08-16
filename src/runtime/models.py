@@ -39,6 +39,11 @@ class RuntimePolicyConfig(ArgusModel):
             "issue_offer",
         ]
     )
+    # Tool execution is deny-by-default. Operators must explicitly declare the
+    # harmless tools their deployment exposes; approval tools remain reviewable
+    # even when they are not in this allow-list.
+    allowed_tools: list[str] = Field(default_factory=list)
+    deny_unknown_tools: bool = True
     allowed_email_domains: list[str] = Field(default_factory=lambda: ["university.edu"])
     block_output_patterns: list[str] = Field(
         default_factory=lambda: [

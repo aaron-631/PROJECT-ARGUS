@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from src.runtime.audit import AuditWriter
+from src.runtime.audit import AuditIntegrityError, AuditWriter
 from src.runtime.config import load_runtime_config
 from src.runtime.gateway import RuntimeGateway
 from src.runtime.metrics import RuntimeMetrics
@@ -174,6 +174,30 @@ async def test_gateway_blocks_model_proposed_dangerous_tool(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_gateway_blocks_model_proposed_responses_function_call(tmp_path: Path) -> None:
+    config = load_runtime_config(
+        environ={"ARGUS_RUNTIME_AUDIT_PATH": str(tmp_path / "events.jsonl")}
+    )
+    session = FakeSession(
+        FakeResponse(
+            {"output": [{"type": "function_call", "name": "execute_command", "arguments": "{}"}]}
+        )
+    )
+    gateway = RuntimeGateway(
+        config,
+        session=session,  # type: ignore[arg-type]
+        audit=AuditWriter(tmp_path / "events.jsonl"),
+    )
+
+    response = await gateway.handle_messages(
+        FakeRequest(json.dumps({"input": "run the command"}).encode())
+    )  # type: ignore[arg-type]
+
+    assert response.status == 502
+    assert "UNKNOWN_TOOL_BLOCKED" in response.text
+
+
+@pytest.mark.asyncio
 async def test_gateway_holds_model_proposed_approval_tool(tmp_path: Path) -> None:
     config = load_runtime_config(
         environ={"ARGUS_RUNTIME_AUDIT_PATH": str(tmp_path / "events.jsonl")}
@@ -331,3 +355,11 @@ def test_audit_hash_chain_and_hmac_are_verifiable(tmp_path: Path) -> None:
     lines[0] = lines[0].replace('"decision": "allow"', '"decision": "tampered"')
     audit_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     assert AuditWriter.verify(audit_path, b"audit-key") is False
+
+
+def test_audit_writer_refuses_to_append_to_corrupt_chain(tmp_path: Path) -> None:
+    audit_path = tmp_path / "events.jsonl"
+    audit_path.write_text("not-json\n", encoding="utf-8")
+
+    with pytest.raises(AuditIntegrityError):
+        AuditWriter(audit_path)

@@ -96,7 +96,7 @@ class MarkdownExporter(BaseExporter):
             f"- Profile: `{report.metadata.profile}`",
             f"- Scan ID: `{report.metadata.scan_id}`",
             f"- Evaluation methodology: `{report.evaluation_methodology}`",
-            f"- Decision: **{report.summary.get('decision', 'UNKNOWN')}** "
+            f"- Overall findings: **{report.summary.get('overall_decision', report.summary.get('decision', 'UNKNOWN'))}** "
             f"(fail on `{report.summary.get('fail_on', 'HIGH')}`)",
             "",
             "## Summary",
@@ -107,6 +107,9 @@ class MarkdownExporter(BaseExporter):
             f"Maximum risk: **{report.summary.get('max_risk', 0)} / 10**",
             "",
         ]
+        gate_decision = report.summary.get("gate_decision")
+        if gate_decision:
+            lines.extend([f"- CI gate decision: **{gate_decision}**", ""])
         compliance = report.summary.get("compliance_coverage")
         if isinstance(compliance, dict):
             lines.extend(["## Standards coverage", ""])

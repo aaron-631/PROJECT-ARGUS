@@ -1,6 +1,14 @@
 services:
   runtime:
     build: .
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: "1.0"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     entrypoint: ["python", "runtime_gateway.py"]
     command: ["--config", "/app/config/runtime/placement_agent.yaml", "--host", "0.0.0.0"]
     ports:
@@ -9,7 +17,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./config/runtime:/app/config/runtime:ro
-      - ./runtime-audit:/app/runtime-audit
+      - runtime_audit:/app/runtime-audit
     environment:
       ARGUS_RUNTIME_UPSTREAM_URL: ${ARGUS_RUNTIME_UPSTREAM_URL:?Set ARGUS_RUNTIME_UPSTREAM_URL}
       ARGUS_RUNTIME_AUDIT_PATH: /app/runtime-audit/events.jsonl
@@ -21,3 +29,6 @@ services:
       ARGUS_RUNTIME_AUDIT_KEY: ${ARGUS_RUNTIME_AUDIT_KEY:-}
       ARGUS_RUNTIME_AUDIT_SINK_URL: ${ARGUS_RUNTIME_AUDIT_SINK_URL:-}
       ARGUS_RUNTIME_AUDIT_SINK_TOKEN: ${ARGUS_RUNTIME_AUDIT_SINK_TOKEN:-}
+
+volumes:
+  runtime_audit:

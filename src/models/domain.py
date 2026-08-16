@@ -14,6 +14,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src import __version__
+
 
 class ArgusModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
@@ -182,7 +184,7 @@ class AttackResult(ArgusModel):
 
 class ReportMetadata(ArgusModel):
     schema_version: str = "1.0"
-    argus_version: str = "1.0.0"
+    argus_version: str = __version__
     source_type: Literal["local", "git"]
     source: str
     profile: str = "default"
