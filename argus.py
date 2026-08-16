@@ -19,6 +19,7 @@ from src.core.doctor import run_doctor
 from src.core.engine import ArgusEngine
 from src.core.ingress import IngressError, ingest
 from src.core.sanitization import sanitize
+from src.core.taxonomy import taxonomy_for_rule
 from src.core.mcp_probe import (
     MCPProbeError,
     MCPProbeLimits,
@@ -225,6 +226,9 @@ def build_parser() -> argparse.ArgumentParser:
     rules_parser = subparsers.add_parser("rules", help="List all available security rules")
     rules_parser.add_argument(
         "--verbose", action="store_true", help="Show full descriptions and remediation"
+    )
+    rules_parser.add_argument(
+        "--compliance", action="store_true", help="Show OWASP, MITRE ATLAS, and CWE mappings"
     )
     return parser
 
@@ -572,6 +576,12 @@ def run_rules(args: argparse.Namespace) -> int:
     for rule_id, (severity, title, description, _score, remediation) in sorted(_RULES.items()):
         sev = severity.value if hasattr(severity, "value") else str(severity)
         print(f"{rule_id} [{sev}] {title}")
+        if args.compliance:
+            mapping = taxonomy_for_rule(rule_id)
+            print(f"  OWASP: {', '.join(mapping.owasp_ids) or 'not mapped'}")
+            print(f"  ATLAS: {', '.join(mapping.atlas_ids) or 'not mapped'}")
+            print(f"  CWE: {', '.join(mapping.cwe_ids) or 'not assigned'}")
+            print(f"  Status: {mapping.status}")
         if args.verbose:
             print(f"  {description}")
             print(f"  Fix: {remediation}")

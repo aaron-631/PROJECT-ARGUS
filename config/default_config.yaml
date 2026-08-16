@@ -32,5 +32,5 @@ target:
 # Empty means "every registered scanner", so a pip-installed plugin runs without
 # editing this file. List explicit ids to restrict; use disabled_modules to drop one.
 scanners: []
-attacks: ["prompt_injection", "jailbreak", "data_extraction"]
-dataset_version: "1.0.0"
+attacks: ["prompt_injection", "jailbreak", "data_extraction", "indirect_prompt_injection"]
+dataset_version: "1.1.0"

@@ -82,6 +82,7 @@ def discover_builtin_modules() -> None:
     """Import builtins once, making discovery order stable."""
 
     from src.modules.attacks.data_extraction import DataExtractionModule
+    from src.modules.attacks.indirect_injection import IndirectPromptInjectionModule
     from src.modules.attacks.jailbreak import JailbreakModule
     from src.modules.attacks.prompt_injection import PromptInjectionModule
     from src.modules.scanners.mcp_scanner import MCPScanner
@@ -97,6 +98,7 @@ def discover_builtin_modules() -> None:
 
     builtins = [
         ("attack_modules", DataExtractionModule, BaseAttackModule, "module_id"),
+        ("attack_modules", IndirectPromptInjectionModule, BaseAttackModule, "module_id"),
         ("attack_modules", JailbreakModule, BaseAttackModule, "module_id"),
         ("attack_modules", PromptInjectionModule, BaseAttackModule, "module_id"),
         ("scanners", MCPScanner, BaseStaticScanner, "scanner_id"),

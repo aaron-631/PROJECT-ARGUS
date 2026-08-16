@@ -43,11 +43,20 @@ include = ["src*"]
 "data/attacks/data_extraction/partial_leakage" = [
     "data/attacks/data_extraction/partial_leakage/payloads.json"
 ]
+"data/attacks/data_extraction/encoded_leakage" = [
+    "data/attacks/data_extraction/encoded_leakage/payloads.json"
+]
+"data/attacks/indirect_prompt_injection/retrieved_document" = [
+    "data/attacks/indirect_prompt_injection/retrieved_document/payloads.json"
+]
 "data/attacks/jailbreaks/hypothetical_scenarios" = [
     "data/attacks/jailbreaks/hypothetical_scenarios/payloads.json"
 ]
 "data/attacks/prompt_injection/direct_system_override" = [
     "data/attacks/prompt_injection/direct_system_override/payloads.json"
+]
+"data/attacks/prompt_injection/encoded_context" = [
+    "data/attacks/prompt_injection/encoded_context/payloads.json"
 ]
 
 [tool.black]

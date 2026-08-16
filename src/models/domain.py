@@ -108,6 +108,11 @@ class Finding(ArgusModel):
     risk_score: float = Field(default=0.0, ge=0.0, le=10.0)
     evaluation_methodology: str = "deterministic_static"
     remediation: str = ""
+    # Standards metadata is additive and optional so third-party scanners can
+    # continue emitting findings while gradually adopting the registry.
+    owasp_ids: list[str] = Field(default_factory=list)
+    atlas_ids: list[str] = Field(default_factory=list)
+    cwe_ids: list[str] = Field(default_factory=list)
 
     @field_validator("rule_id")
     @classmethod
@@ -134,6 +139,9 @@ class AttackResponse(ArgusModel):
     text: str = ""
     headers: dict[str, str] = Field(default_factory=dict)
     latency_ms: float | None = Field(default=None, ge=0.0)
+    # Only normalized, bounded tool-call descriptors are retained. Arguments
+    # are intentionally not copied into reports.
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class EvaluationResult(ArgusModel):
@@ -166,6 +174,10 @@ class AttackResult(ArgusModel):
     risk_score: float = Field(default=0.0, ge=0.0, le=10.0)
     evaluation_methodology: str = "canonical_only"
     error: str | None = None
+    owasp_ids: list[str] = Field(default_factory=list)
+    atlas_ids: list[str] = Field(default_factory=list)
+    cwe_ids: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReportMetadata(ArgusModel):
@@ -174,7 +186,7 @@ class ReportMetadata(ArgusModel):
     source_type: Literal["local", "git"]
     source: str
     profile: str = "default"
-    dataset_version: str = "1.0.0"
+    dataset_version: str = "1.1.0"
     scan_id: str
     generated_at: str | None = None
 

@@ -28,8 +28,8 @@ def test_dynamic_attacks_use_injected_target_and_canonical_methodology() -> None
         return await ArgusEngine(config, target).run(ingest_local("config"))
 
     result = asyncio.run(run())
-    assert target.calls == 3
-    assert len(result["attack_results"]) == 3
+    assert target.calls == 12
+    assert len(result["attack_results"]) == 12
     assert all(
         item["evaluation_methodology"] == "canonical_only" for item in result["attack_results"]
     )

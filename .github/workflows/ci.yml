@@ -5,6 +5,9 @@ on: [push, pull_request]
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -48,6 +51,11 @@ jobs:
           name: argus-sarif-report
           path: reports/ci/report.sarif
           if-no-files-found: ignore
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always() && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/ci/report.sarif
       - name: Build Docker image
         run: docker build -t argus-ci .
       - name: Scan Docker image for high-severity vulnerabilities

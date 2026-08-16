@@ -1,0 +1,35 @@
+{
+  "mcpServers": {
+    "placement-readonly": {
+      "command": "python",
+      "args": ["-m", "placement_mcp"],
+      "verified": true
+    }
+  },
+  "retrieval": {
+    "vector_store": "placement-index",
+    "trust_boundary": "untrusted_context",
+    "provenance_required": true,
+    "validate_documents": true
+  },
+  "tools": [
+    {
+      "name": "read_student_record",
+      "description": "Read one placement record by its bounded student identifier.",
+      "require_approval": false,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "student_id": {
+            "type": "string",
+            "pattern": "^[A-Z0-9-]{1,32}$"
+          }
+        },
+        "required": ["student_id"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "max_iterations": 10,
+  "rate_limit_rps": 2
+}

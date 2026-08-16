@@ -4,9 +4,10 @@ This POC demonstrates the complete supported path in a short, reproducible
 run:
 
 1. scan an agent/security configuration;
-2. test a model endpoint with deterministic behavior probes;
-3. inspect a real MCP server without invoking its tools;
-4. place the runtime gateway in front of an upstream and prove blocking,
+2. prove an indirect prompt injection from retrieved data is blocked at the tool boundary;
+3. test a model endpoint with deterministic behavior probes;
+4. inspect a real MCP server without invoking its tools;
+5. place the runtime gateway in front of an upstream and prove blocking,
    forwarding, metrics, and audit output.
 
 The mock service is used only for deterministic LLM/runtime behavior. The MCP
@@ -54,7 +55,22 @@ Acceptance check:
 For a real project, replace `./config` with the agent repository, skill root,
 OpenClaw directory, or selected Claude Code/Codex/Gemini configuration files.
 
-## 2. Deterministic live LLM check
+## 2. Isolated indirect-injection proof
+
+This test is local and safe. It uses a fake SQLite retrieval record, a fake
+agent that proposes `execute_command` after reading the poisoned record, a
+deterministic `RuntimePolicy`, and a canary file. No shell command is executed.
+
+```bash
+.venv/bin/python examples/indirect-injection/run_demo.py
+```
+
+Acceptance check: the JSON contains `"decision": "BLOCK"`,
+`"side_effects": 0`, `"canary_modified": false`, and
+`"execution_attempted": false`. The same behavior is asserted by
+`tests/integration/test_indirect_injection.py`.
+
+## 3. Deterministic live LLM check
 
 Terminal 1:
 
@@ -72,8 +88,8 @@ Terminal 2:
   --output ./reports/poc/mock-llm
 ```
 
-The fixture intentionally returns one unsafe response so the evaluator has a
-known positive case. `--fail-on CRITICAL` lets the demonstration complete while
+The fixture intentionally returns several unsafe responses so the evaluator has
+known positive cases. `--fail-on CRITICAL` lets the demonstration complete while
 keeping the high-risk evidence in the report. A real endpoint should use the
 appropriate provider adapter and credentials from environment variables; see
 [WORKFLOW.md Section 6.4](WORKFLOW.md#64-test-a-real-model-endpoint).
@@ -88,7 +104,7 @@ Acceptance check:
 
 Stop Terminal 1 after the scan.
 
-## 3. Real MCP discovery
+## 4. Real MCP discovery
 
 This is the real integration step. It starts the pinned official filesystem MCP
 server with one narrow directory as its only application-level root. Argus
@@ -129,7 +145,7 @@ execution results into the report. For Streamable HTTP, use the same command
 shape with `--transport streamable-http`, `--endpoint`, and
 `--header-env HEADER=ENV_VAR`.
 
-## 4. Runtime blocking and monitoring
+## 5. Runtime blocking and monitoring
 
 This proves the V2 gateway against the repository's deterministic mock
 upstream:
@@ -183,6 +199,7 @@ reports/poc/mock-llm/report.md
 reports/poc/real-mcp/report.md
 reports/poc/real-mcp/report.json
 reports/poc/real-mcp/report.sarif
+examples/indirect-injection/run_demo.py output
 runtime-audit/events.jsonl
 ```
 
@@ -198,6 +215,7 @@ A sanitized recorded MCP result is checked in at
 The POC is successful when:
 
 - static configuration produces a structured report;
+- a retrieved-document injection reaches a fake tool proposal and is blocked without a side effect;
 - dynamic model behavior produces deterministic attack evidence;
 - a real MCP server is discovered without tool execution;
 - dangerous runtime input is blocked;
