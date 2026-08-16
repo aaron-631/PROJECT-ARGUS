@@ -67,6 +67,37 @@ def test_sarif_export_contains_github_finding_location(tmp_path: Path) -> None:
     assert run["results"][0]["locations"][0]["physicalLocation"]["region"]["startLine"] == 4
 
 
+def test_sarif_export_gives_dynamic_results_a_report_location(tmp_path: Path) -> None:
+    results = {
+        "metadata": {
+            "source_type": "local",
+            "source": "fixture",
+            "scan_id": "stable",
+        },
+        "configuration": {},
+        "findings": [],
+        "attack_results": [
+            {
+                "module_id": "prompt_injection",
+                "attack_type": "prompt_injection",
+                "payload_id": "PI-001",
+                "payload": "test payload",
+                "canonical_result": {"attack_succeeded": True},
+                "risk_score": 7.0,
+            }
+        ],
+        "summary": {"decision": "BLOCK", "fail_on": "HIGH"},
+        "evaluation_methodology": "canonical_only",
+    }
+
+    destination = SARIFExporter().export(results, tmp_path / "report.sarif")
+    sarif = json.loads(destination.read_text(encoding="utf-8"))
+    location = sarif["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
+
+    assert location["artifactLocation"]["uri"] == "report.json"
+    assert location["region"]["startLine"] == 1
+
+
 def test_markdown_export_surfaces_native_permission_family(tmp_path: Path) -> None:
     results = {
         "metadata": {"source_type": "local", "source": "fixture", "scan_id": "stable"},

@@ -306,6 +306,19 @@ class SARIFExporter(BaseExporter):
             physical["region"] = {"startLine": line}
         return [{"physicalLocation": physical}]
 
+    @staticmethod
+    def _report_location() -> list[dict[str, Any]]:
+        """Give Code Scanning a stable location for non-file evidence."""
+
+        return [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "report.json"},
+                    "region": {"startLine": 1},
+                }
+            }
+        ]
+
     def export(self, results: dict[str, Any] | ScanReport, output_path: str | Path) -> Path:
         report = build_report(results)
         validate_contracts(report)
@@ -341,7 +354,8 @@ class SARIFExporter(BaseExporter):
                 "ruleId": rule_id,
                 "level": self._level(finding.severity.value),
                 "message": {"text": f"{finding.description} Evidence: {evidence}"},
-                "locations": self._location(finding.source_file, finding.line),
+                "locations": self._location(finding.source_file, finding.line)
+                or self._report_location(),
                 "partialFingerprints": {
                     "primaryLocationLineHash": self._fingerprint(
                         rule_id, finding.source_file, finding.line, evidence
@@ -396,6 +410,7 @@ class SARIFExporter(BaseExporter):
                     "ruleId": rule_id,
                     "level": "error" if succeeded else "warning",
                     "message": {"text": f"{message} Payload: {attack.payload_id}."},
+                    "locations": self._report_location(),
                     "partialFingerprints": {
                         "primaryLocationLineHash": self._fingerprint(
                             rule_id, attack.payload_id, attack.error
