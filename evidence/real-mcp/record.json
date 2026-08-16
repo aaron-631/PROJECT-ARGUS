@@ -31,7 +31,7 @@
   "command_mode": "npx --offline (package cached)",
   "artifact_sha256": {
     "report.json": "a6c38a01b9d0981cdb322ec0460ecd1d6d8fdb48c73114d143d92997678eb548",
-    "report.md": "d25b4c1659b5bfcadc41508e75b202316976998a6c8925f2023d953503369709",
+    "report.md": "c454f709dafeefb18b45dab3efaf5b866f8a4b0d59db17510d75cadb9f9f8820",
     "report.sarif": "74c332df28376ed306b1d0a521a1732471be3f4cad563c45787a80ee662b7014"
   }
 }
