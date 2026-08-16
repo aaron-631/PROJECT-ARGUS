@@ -5,6 +5,8 @@ lightweight Keep a Changelog style; releases are versioned in `pyproject.toml`.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-16
+
 ### Security
 
 - Baseline identities now include finding locations, so duplicate occurrences
