@@ -29,9 +29,9 @@ proposal is blocked and prints `side_effects: 0`.
 
 ## Recorded run
 
-Recorded on 2026-08-16 from the final remediation source commit (recorded in
-the release history), using Argus `0.2.0`, Python `3.14.4`, Node.js `v24.15.0`,
-and npm `11.16.0`.
+Recorded on 2026-08-16 from source commit
+`81991c8eab08a03fb3b6d9e7e37401935b37e62a`, using Argus `0.2.0`, Python
+`3.14.4`, Node.js `v24.15.0`, and npm `11.16.0`.
 The elapsed values below are the Argus internal scan timing; shell startup time
 is shown separately only to make the result reproducible on this machine.
 

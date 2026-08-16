@@ -1,7 +1,8 @@
 {
   "evidence_type": "redacted_recorded_run",
-  "source_baseline_commit": "f1cae6a",
-  "source_branch": "feature/argus-taxonomy-indirect-injection",
+  "source_baseline_commit": "81991c8eab08a03fb3b6d9e7e37401935b37e62a",
+  "source_branch": "main",
+  "argus_version": "0.2.0",
   "server_package": "@modelcontextprotocol/server-filesystem@2026.7.10",
   "transport": "stdio",
   "protocol_version": "2025-06-18",
@@ -25,10 +26,12 @@
       "remediation": "Add human approval immediately before the side effect and validate the tool arguments against a strict schema."
     }
   ],
-  "elapsed_seconds": 1.016,
+  "elapsed_seconds": 0.64,
+  "cold_start_elapsed_seconds": 70.628,
+  "command_mode": "npx --offline (package cached)",
   "artifact_sha256": {
-    "report.json": "0a7490dd380f07f9d1e62067948cf2b0194912d2a46a8dd0c01f238b3c4ad46c",
-    "report.md": "3444135b5a4e4ce114d2d00b16f7c427b416badc44ec5f1c4a72d4277d62ad4d",
-    "report.sarif": "95a29133a6323473e615b6bc83f03bc5ac70cf88dca98e6fb809fabbc95abc30"
+    "report.json": "a6c38a01b9d0981cdb322ec0460ecd1d6d8fdb48c73114d143d92997678eb548",
+    "report.md": "d25b4c1659b5bfcadc41508e75b202316976998a6c8925f2023d953503369709",
+    "report.sarif": "74c332df28376ed306b1d0a521a1732471be3f4cad563c45787a80ee662b7014"
   }
 }
