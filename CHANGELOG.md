@@ -5,6 +5,11 @@ lightweight Keep a Changelog style; releases are versioned in `pyproject.toml`.
 
 ## [Unreleased]
 
+### Delivery
+
+- Updated the GitHub Actions runtime to the Node 24-compatible immutable
+  action releases, removing the hosted-runner Node 20 deprecation warning.
+
 ## [0.2.1] - 2026-08-16
 
 ### Security
