@@ -503,7 +503,7 @@ YAML, and TOML document rather than depending on one filename:
 
 The resulting checks are intentionally understandable:
 
-- `ARGUS_ST_001` and `ARGUS_ST_016`: wildcard paths or administrative tool permissions;
+- `ARGUS_ST_001` and `ARGUS_ST_016`: wildcard paths or administrative agent/tool/CLI permissions;
 - `ARGUS_ST_002`: a tool schema has fields but no meaningful bounds, enum, or pattern;
 - `ARGUS_ST_011`: `env`, `pass_env`, or `environment` inherits every process variable;
 - `ARGUS_ST_013`: a remote MCP server has no verification metadata;
@@ -693,8 +693,9 @@ were intentionally excluded from the scan targets and evidence:
 | Test | What was scanned or contacted | Result |
 | --- | --- | --- |
 | Claude Code 2.1.199 global settings | `$HOME/.claude/settings.json` | BLOCK; 1 CRITICAL hardcoded-credential finding; the secret value was not recorded |
-| Claude Code 2.1.199 local settings | `$HOME/.claude/settings.local.json` | PASS; 0 findings |
-| Codex CLI 0.146.0 | `$HOME/.codex/config.toml` | PASS; 0 findings and no MCP declarations in this file |
+| Claude Code 2.1.199 local settings | `$HOME/.claude/settings.local.json` | BLOCK; 2 CRITICAL credential-shaped findings and 9 unbounded high-impact permission families |
+| Codex CLI 0.146.0 | `$HOME/.codex/config.toml` and user rules | PASS; 0 findings and no MCP declarations in these files |
+| Antigravity local settings | `$HOME/.gemini/antigravity-cli/settings.json` | PASS; 0 findings |
 | Gemini CLI 0.49.0 | `$HOME/.gemini/config/config.json` | PASS; 0 findings |
 | Gemini MCP registry | `$HOME/.gemini/config/mcp_config.json` | ERROR; file is empty, so Argus correctly refused to call it safe |
 | OpenClaw | `$HOME/.openclaw` | Not installed in this environment; no result claimed |
@@ -771,6 +772,26 @@ that Argus attached to a running CLI. It proves what the selected deployment
 files declare; live traffic and MCP tool calls still need an authorized
 endpoint probe or the runtime gateway.
 
+### 6.6.2 Current local CLI verification
+
+I also tested the installed local clients, using only configuration surfaces
+that do not contain conversation history or session databases. The sanitized
+record is in [`evidence/real-cli/README.md`](evidence/real-cli/README.md).
+
+The useful result was Claude Code’s native permission policy: Argus found the
+credential-shaped values in the global/local settings and, through
+`ARGUS_ST_016`, found nine distinct unbounded high-impact shell permission
+families in the local allow-list. Bounded commands such as `Bash(git status)`
+were not flagged. Codex configuration and rules passed; Antigravity/Gemini
+settings passed; Gemini’s empty MCP registry returned `ERROR` rather than a
+false `PASS`.
+
+For behavior, an ephemeral read-only Codex headless run returned its expected
+marker. Claude Code timed out without a response, and Gemini reached its
+provider path but returned HTTP 401 after its optional Docker sandbox was
+skipped because the local sandbox image was unavailable. These are environment
+or authentication results, not security passes. Argus reports them as such.
+
 ### What this evidence proves—and what it does not
 
 For placement discussions, use this exact boundary:
@@ -778,7 +799,7 @@ For placement discussions, use this exact boundary:
 | Proven by the repository and recorded run | Not proven by the recorded run |
 | --- | --- |
 | Static audits can inspect real Claude Code, Codex CLI, and Gemini CLI configuration files selected by the operator. | Argus does not attach to a running CLI, inspect chat history, or read private credential/session databases. |
-| A real pinned stdio MCP server can be launched, initialized, paginated with `tools/list`, analyzed, and closed without a tool call. | The real run did not invoke a live OpenAI, Anthropic, Gemini, or Ollama model. |
+| A real pinned stdio MCP server can be launched, initialized, paginated with `tools/list`, analyzed, and closed without a tool call. | The recorded MCP run did not invoke a provider-neutral HTTP model probe; the separate local CLI smoke results are documented below. |
 | The Streamable HTTP implementation has unit coverage for JSON, SSE, sessions, pagination, and negotiated protocol headers; the code enforces response/tool limits. | A live authenticated Streamable HTTP server was not part of this recorded run; validate one in the target environment before production. |
 | The repository defines CI, Docker, Compose, report-contract, and runtime-gateway smoke workflows; the local Python checks pass on this branch. | “Any device” is not a tested guarantee: Windows, macOS, ARM hosts, enterprise proxies, and every MCP server implementation still require a local smoke test. |
 
@@ -788,10 +809,12 @@ in an interview is: “It works end to end for the supported local and HTTP
 contracts, and I can show the real MCP report; I would run the short environment
 smoke test before approving a new provider, transport, or operating system.”
 
-No live OpenAI, Anthropic, Gemini API, or Ollama model probe was claimed in this
-run: no API key was available and no Ollama service was running. To produce
-that evidence on another machine, use the provider commands in Section 6.4
-with an endpoint and credentials that the operator is authorized to test.
+The recorded MCP/static run above did not include a provider-neutral HTTP model
+probe. The separate local CLI smoke check in Section 6.6.2 did reach Codex and
+Gemini CLI paths, while Claude timed out; it must not be confused with a full
+HTTP endpoint evaluation. To produce that stronger evidence on another
+machine, use the provider commands in Section 6.4 with an endpoint and
+credentials that the operator is authorized to test.
 
 For first-time users, the safest order is: scan one local config, inspect the
 three report files, run the deterministic endpoint to learn dynamic results,
@@ -1232,7 +1255,7 @@ The 29 canonical rules are:
 | `ARGUS_ST_013` | Remote MCP server lacks verification metadata | HIGH |
 | `ARGUS_ST_014` | Known agent framework is old or unpinned | MEDIUM |
 | `ARGUS_ST_015` | Non-local HTTP endpoint instead of HTTPS | MEDIUM |
-| `ARGUS_ST_016` | Wildcard, all-resource, root, admin, or sudo-style MCP permission | CRITICAL |
+| `ARGUS_ST_016` | Wildcard, all-resource, root, admin, sudo-style, or unbounded native command permission | CRITICAL |
 | `ARGUS_ST_017` | High-impact MCP tool without approval | HIGH |
 | `ARGUS_ST_018` | Unrestricted MCP network egress | HIGH |
 | `ARGUS_ST_019` | Unpinned `npx`, `uvx`, or `pipx` MCP package command | HIGH |
@@ -1256,6 +1279,14 @@ Each finding contains:
 - evidence such as a key path, tool, URL, or matched operation;
 - deployment context and bounded risk score;
 - `deterministic_static` methodology.
+
+Provider-native permission lists are also interpreted when they follow a
+recognized policy shape. For example, a Claude Code entry such as
+`permissions.allow: ["Bash(curl:*)"]` is not treated as harmless text: Argus
+reports the unbounded shell grant through `ARGUS_ST_016`. A bounded entry such
+as `Bash(git status)` is left alone. This is deliberately conservative: it
+flags wildcard high-impact command families, not every command an agent is
+allowed to run.
 
 Example insecure fixture, based on `tests/unit/test_ingress_and_scanner.py`:
 

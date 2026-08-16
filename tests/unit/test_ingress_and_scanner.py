@@ -154,6 +154,38 @@ def test_policy_deny_list_is_not_reported_as_destructive(tmp_path: Path) -> None
     assert "ARGUS_ST_006" not in found
 
 
+def test_native_agent_allowlist_flags_unbounded_shell_grants(tmp_path: Path) -> None:
+    """Provider-native permission strings must not disappear as opaque list values."""
+
+    (tmp_path / "settings.json").write_text(
+        json.dumps(
+            {
+                "permissions": {
+                    "allow": [
+                        "Bash(curl:*)",
+                        "Bash(curl:*)",
+                        "Bash(rm:*)",
+                        "Bash(*)",
+                        "Bash(git status)",
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    from src.modules.scanners.mcp_scanner import MCPScanner
+
+    findings = [
+        item
+        for item in MCPScanner().scan(ingest_local(str(tmp_path)))
+        if item.rule_id == "ARGUS_ST_016"
+    ]
+
+    assert len(findings) == 3
+    assert {item.evidence["permission_family"] for item in findings} == {"*", "curl", "rm"}
+
+
 def test_destructive_tool_is_still_reported_in_yaml_and_json(tmp_path: Path) -> None:
     """Equivalent YAML and JSON must reach the same verdict."""
 

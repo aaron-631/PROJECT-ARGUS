@@ -75,7 +75,7 @@ external trust service.
 | ARGUS_ST_013 | LLM03, ASI04 | AML.T0046 | — | partial; metadata declaration only |
 | ARGUS_ST_014 | LLM03, ASI04 | — | CWE-1104 | partial; heuristic baseline |
 | ARGUS_ST_015 | LLM03, LLM02 | — | CWE-319 | implemented |
-| ARGUS_ST_016 | LLM06, ASI02, ASI03 | AML.T0052 | CWE-250 | implemented |
+| ARGUS_ST_016 | LLM06, ASI02, ASI03 | AML.T0052 | CWE-250 | implemented; includes native CLI allow-lists |
 | ARGUS_ST_017 | LLM06, ASI02 | AML.T0052 | CWE-862 | implemented |
 | ARGUS_ST_018 | LLM06, ASI02 | AML.T0048 | — | partial; static egress declaration |
 | ARGUS_ST_019 | LLM03, ASI04 | — | CWE-1104 | implemented |

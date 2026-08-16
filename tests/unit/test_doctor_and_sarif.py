@@ -3,7 +3,7 @@ from pathlib import Path
 
 from argus import EXIT_ERROR, _exit_for_results
 from src.core import doctor
-from src.reporting import SARIFExporter
+from src.reporting import MarkdownExporter, SARIFExporter
 
 
 def test_doctor_report_is_secret_free_and_checks_optional_provider(tmp_path: Path) -> None:
@@ -65,6 +65,36 @@ def test_sarif_export_contains_github_finding_location(tmp_path: Path) -> None:
         "config/mcp.json"
     )
     assert run["results"][0]["locations"][0]["physicalLocation"]["region"]["startLine"] == 4
+
+
+def test_markdown_export_surfaces_native_permission_family(tmp_path: Path) -> None:
+    results = {
+        "metadata": {"source_type": "local", "source": "fixture", "scan_id": "stable"},
+        "configuration": {},
+        "findings": [
+            {
+                "rule_id": "ARGUS_ST_016",
+                "severity": "CRITICAL",
+                "title": "Wildcard or administrative agent permission",
+                "description": "A native policy grants an unbounded command.",
+                "confidence_score": 0.92,
+                "evidence": {
+                    "permission_family": "curl",
+                    "match": "unbounded high-impact shell permission",
+                },
+                "source_file": "settings.local.json",
+                "line": 3,
+                "risk_score": 4.14,
+                "remediation": "Replace the broad permission.",
+            }
+        ],
+        "attack_results": [],
+        "summary": {"decision": "BLOCK", "fail_on": "HIGH"},
+        "evaluation_methodology": "canonical_only",
+    }
+
+    destination = MarkdownExporter().export(results, tmp_path / "report.md")
+    assert "Permission family: `curl`" in destination.read_text(encoding="utf-8")
 
 
 def test_cli_exit_code_preserves_error_decision() -> None:
